@@ -286,12 +286,12 @@ zero-extending the 64-bit `Sequence Number` field from the L1 header.
       v
 [ KEYS_DERIVED ]  --- HKDF-SHA256 Split() ---
       v
-[ ENCRYPTED_SESSION ]  <----------------------+
-      |  EncryptedData (0x03) / Ping (0x04) /  |
-      |  Ack (0x06)                            |
-      |                                        |
-      | rekey interval elapsed or N frames sent|
-      v                                        |
+[ ENCRYPTED_SESSION ]  <------------------------+
+      |  EncryptedData (0x03) / Ping (0x04) /   |
+      |  Ack (0x06)                             |
+      |                                         |
+      | rekey interval elapsed or N frames sent |
+      v                                         |
 [ REKEYING ] -- new HKDF derivation ------------+
       |
       | SessionClose (0x05) or idle timeout
