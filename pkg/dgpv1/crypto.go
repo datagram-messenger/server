@@ -124,7 +124,7 @@ func nonce(sequence uint64) []byte {
 }
 
 func validateEncryptedHeader(messageType MessageType, sessionID [16]byte, sequence uint64) error {
-	if messageType < MessageTypeEncryptedData || messageType > MessageTypeRekeyAck {
+	if messageType < MessageTypeEncryptedData || messageType > MessageTypeError {
 		return fmt.Errorf("%w: 0x%02x", ErrUnencryptedType, messageType)
 	}
 	if sequence == 0 {

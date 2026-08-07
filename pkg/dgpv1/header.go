@@ -53,7 +53,7 @@ const (
 	MessageTypeAck
 	MessageTypeResumptionTicket
 	MessageTypeRekeyInit
-	MessageTypeRekeyAck
+	MessageTypeError
 )
 
 // Header is the 40-byte fixed DGPv1 frame header. Reserved wire fields are
