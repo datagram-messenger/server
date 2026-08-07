@@ -10,6 +10,7 @@ import (
 const (
 	HandshakeInitFixedSize     = 36
 	HandshakeResponseFixedSize = 32
+	HandshakeFinishFixedSize   = 64
 	PingPongSize               = 9
 	RekeyInitSize              = 36
 	MaxAckSequences            = 64
@@ -115,6 +116,26 @@ func (m *HandshakeResponse) UnmarshalBinary(data []byte) error {
 	var ephemeral [32]byte
 	copy(ephemeral[:], data[:32])
 	*m = HandshakeResponse{ServerEphemeral: ephemeral, NoisePayload: append([]byte(nil), data[32:]...)}
+	return nil
+}
+
+// HandshakeFinish carries the third and final Noise XX flight.
+type HandshakeFinish struct {
+	NoisePayload []byte
+}
+
+func (m HandshakeFinish) MarshalBinary() ([]byte, error) {
+	if len(m.NoisePayload) != HandshakeFinishFixedSize {
+		return nil, fmt.Errorf("%w: got %d, want %d", ErrMessageLength, len(m.NoisePayload), HandshakeFinishFixedSize)
+	}
+	return append([]byte(nil), m.NoisePayload...), nil
+}
+
+func (m *HandshakeFinish) UnmarshalBinary(data []byte) error {
+	if len(data) != HandshakeFinishFixedSize {
+		return fmt.Errorf("%w: got %d, want %d", ErrMessageLength, len(data), HandshakeFinishFixedSize)
+	}
+	*m = HandshakeFinish{NoisePayload: append([]byte(nil), data...)}
 	return nil
 }
 
