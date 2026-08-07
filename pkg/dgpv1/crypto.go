@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"golang.org/x/crypto/chacha20poly1305"
 )
@@ -98,10 +99,8 @@ func (c *Codec) Decrypt(frame Frame) ([]byte, error) {
 	if err := validateEncryptedHeader(frame.Header.MessageType, frame.Header.SessionID, frame.Header.Sequence); err != nil {
 		return nil, err
 	}
-	for _, b := range frame.Padding {
-		if b == 0 {
-			return nil, ErrInvalidPadding
-		}
+	if slices.Contains(frame.Padding, 0) {
+		return nil, ErrInvalidPadding
 	}
 	aad, err := frame.Header.MarshalBinary()
 	if err != nil {
