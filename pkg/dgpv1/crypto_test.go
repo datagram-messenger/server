@@ -1,0 +1,170 @@
+package dgpv1
+
+import (
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"testing"
+)
+
+func TestCodecRoundTrip(t *testing.T) {
+	for _, suite := range []CipherSuite{CipherChaCha20Poly1305, CipherAES256GCM} {
+		t.Run(string(rune('0'+suite)), func(t *testing.T) {
+			codec, err := NewCodec(suite, bytes.Repeat([]byte{0x42}, KeySize))
+			if err != nil {
+				t.Fatal(err)
+			}
+			plaintext := []byte("authenticated DGPv1 payload")
+			frame, err := codec.Encrypt(MessageTypeEncryptedData, [16]byte{1}, 0x0102030405060708, plaintext, 17)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(frame.Payload) != len(plaintext) || len(frame.Padding) != 17 {
+				t.Fatalf("body lengths = %d, %d", len(frame.Payload), len(frame.Padding))
+			}
+			for _, b := range frame.Padding {
+				if b == 0 {
+					t.Fatal("generated zero padding byte")
+				}
+			}
+			got, err := codec.Decrypt(frame)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, plaintext) {
+				t.Fatalf("plaintext = %q, want %q", got, plaintext)
+			}
+		})
+	}
+}
+
+func TestNonceLayout(t *testing.T) {
+	got := nonce(0x0102030405060708)
+	want := make([]byte, 12)
+	binary.LittleEndian.PutUint64(want[4:], 0x0102030405060708)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("nonce = %x, want %x", got, want)
+	}
+}
+
+func TestNewCodecErrors(t *testing.T) {
+	for _, size := range []int{0, KeySize - 1, KeySize + 1} {
+		if _, err := NewCodec(CipherChaCha20Poly1305, make([]byte, size)); !errors.Is(err, ErrInvalidKeySize) {
+			t.Fatalf("key size %d error = %v", size, err)
+		}
+	}
+	if _, err := NewCodec(99, make([]byte, KeySize)); !errors.Is(err, ErrUnsupportedCipher) {
+		t.Fatalf("unsupported suite error = %v", err)
+	}
+}
+
+func TestCodecRejectsInvalidEncryptedHeader(t *testing.T) {
+	codec, err := NewCodec(CipherChaCha20Poly1305, make([]byte, KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name      string
+		msgType   MessageType
+		sessionID [16]byte
+		sequence  uint64
+		want      error
+	}{
+		{"handshake type", MessageTypeHandshakeInit, [16]byte{1}, 1, ErrUnencryptedType},
+		{"zero session", MessageTypeEncryptedData, [16]byte{}, 1, ErrInvalidSessionID},
+		{"zero sequence", MessageTypeEncryptedData, [16]byte{1}, 0, ErrInvalidSequence},
+		{"unknown type", 0xff, [16]byte{1}, 1, ErrUnencryptedType},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := codec.Encrypt(tt.msgType, tt.sessionID, tt.sequence, nil, 0); !errors.Is(err, tt.want) {
+				t.Fatalf("Encrypt() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCodecAuthenticationFailuresAreUniform(t *testing.T) {
+	codec, err := NewCodec(CipherChaCha20Poly1305, bytes.Repeat([]byte{1}, KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := codec.Encrypt(MessageTypeAck, [16]byte{1}, 7, []byte("secret"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mutations := []func(*Frame){
+		func(f *Frame) { f.Payload[0] ^= 1 },
+		func(f *Frame) { f.Tag[0] ^= 1 },
+		func(f *Frame) { f.Header.Sequence++ },
+		func(f *Frame) { f.Header.SessionID[0]++ },
+		func(f *Frame) { f.Header.MessageType = MessageTypePingPong },
+	}
+	for i, mutate := range mutations {
+		got := frame
+		got.Payload = append([]byte(nil), frame.Payload...)
+		mutate(&got)
+		if _, err := codec.Decrypt(got); err != ErrAuthentication {
+			t.Fatalf("mutation %d error = %v, want exact ErrAuthentication", i, err)
+		}
+	}
+}
+
+func TestCodecWrongKeyAndCipherFailAuthentication(t *testing.T) {
+	codec, _ := NewCodec(CipherChaCha20Poly1305, bytes.Repeat([]byte{1}, KeySize))
+	frame, err := codec.Encrypt(MessageTypeEncryptedData, [16]byte{1}, 1, []byte("secret"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		suite CipherSuite
+		key   byte
+	}{{CipherChaCha20Poly1305, 2}, {CipherAES256GCM, 1}} {
+		other, err := NewCodec(tc.suite, bytes.Repeat([]byte{tc.key}, KeySize))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := other.Decrypt(frame); err != ErrAuthentication {
+			t.Fatalf("Decrypt() error = %v", err)
+		}
+	}
+}
+
+func TestCodecRejectsZeroPadding(t *testing.T) {
+	codec, _ := NewCodec(CipherChaCha20Poly1305, make([]byte, KeySize))
+	frame, err := codec.Encrypt(MessageTypeEncryptedData, [16]byte{1}, 1, nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame.Padding[0] = 0
+	if _, err := codec.Decrypt(frame); !errors.Is(err, ErrInvalidPadding) {
+		t.Fatalf("Decrypt() error = %v", err)
+	}
+}
+
+func TestCodecAADUsesCanonicalHeader(t *testing.T) {
+	codec, _ := NewCodec(CipherChaCha20Poly1305, make([]byte, KeySize))
+	frame, err := codec.Encrypt(MessageTypeEncryptedData, [16]byte{1}, 1, []byte("x"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame.Header.Flags |= FlagObfuscated
+	if _, err := codec.Decrypt(frame); err != ErrAuthentication {
+		t.Fatalf("Decrypt() error = %v", err)
+	}
+}
+
+func TestRandomNonzeroBytes(t *testing.T) {
+	reader := bytes.NewReader([]byte{0, 1, 0, 2, 3})
+	got, err := randomNonzeroBytes(reader, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, []byte{1, 2, 3}) {
+		t.Fatalf("padding = %v", got)
+	}
+	if _, err := randomNonzeroBytes(bytes.NewReader(nil), 1); err == nil {
+		t.Fatal("expected entropy error")
+	}
+}
