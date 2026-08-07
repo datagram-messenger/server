@@ -45,7 +45,7 @@ func TestReplayWindowOutOfOrderAndDuplicate(t *testing.T) {
 func TestReplayWindowBoundaryAndTooOld(t *testing.T) {
 	var w ReplayWindow
 	commitSequence(t, &w, 3000)
-	commitSequence(t, &w, 953) // distance 2047: still in the window
+	commitSequence(t, &w, 953)              // distance 2047: still in the window
 	checkError(t, &w, 952, ErrReplayTooOld) // distance 2048: exact boundary
 }
 

@@ -5,7 +5,7 @@ import "errors"
 const (
 	// ReplayWindowSize is the number of recent sequence numbers tracked.
 	ReplayWindowSize = 2048
-	replayWordCount   = ReplayWindowSize / 64
+	replayWordCount  = ReplayWindowSize / 64
 )
 
 var (
