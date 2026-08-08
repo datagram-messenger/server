@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -30,14 +31,20 @@ func testConnectionPair(t *testing.T, config ConnectionConfig) (*Connection, *Se
 
 func writeConnectionMessage(t *testing.T, transport *TCPTransport, session *Session, message any) {
 	t.Helper()
-	frame, err := session.Send(message, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), connectionTestTimeout)
-	defer cancel()
-	if err := transport.WriteFrame(ctx, frame); err != nil {
-		t.Fatal(err)
+	for {
+		frame, err := session.Send(message, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), connectionTestTimeout)
+		err = transport.WriteFrame(ctx, frame)
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if frame.Header.MessageType != MessageTypeRekeyInit {
+			return
+		}
 	}
 }
 
@@ -104,10 +111,14 @@ func TestConnectionPingPong(t *testing.T) {
 }
 
 func TestConnectionRekeyContinues(t *testing.T) {
-	received := make(chan any, 2)
+	received := make(chan *EncryptedData, 2)
 	connection, peerSession, peerTransport, cleanup := testConnectionPair(t, ConnectionConfig{
 		Handler: func(_ context.Context, _ *Connection, message any) error {
-			received <- message
+			data, ok := message.(*EncryptedData)
+			if !ok {
+				return nil
+			}
+			received <- data
 			return nil
 		},
 	})
@@ -117,13 +128,18 @@ func TestConnectionRekeyContinues(t *testing.T) {
 	peerSession.sendMu.Lock()
 	peerSession.rekeyFrameLimit = 1
 	peerSession.sendMu.Unlock()
-	writeConnectionMessage(t, peerTransport, peerSession, PingPong{IsResponse: true, Nonce: 1})
-	writeConnectionMessage(t, peerTransport, peerSession, PingPong{IsResponse: true, Nonce: 2})
-	writeConnectionMessage(t, peerTransport, peerSession, PingPong{IsResponse: true, Nonce: 3})
+	writeConnectionMessage(t, peerTransport, peerSession, EncryptedData{StreamID: 1, AppMessageType: 11})
+	writeConnectionMessage(t, peerTransport, peerSession, EncryptedData{StreamID: 2, AppMessageType: 22})
 
-	for i := 0; i < 2; i++ {
+	for i, want := range []EncryptedData{
+		{StreamID: 1, AppMessageType: 11},
+		{StreamID: 2, AppMessageType: 22},
+	} {
 		select {
-		case <-received:
+		case got := <-received:
+			if got.StreamID != want.StreamID || got.AppMessageType != want.AppMessageType {
+				t.Fatalf("message[%d] = %#v, want %#v", i, got, want)
+			}
 		case <-time.After(connectionTestTimeout):
 			t.Fatal("connection stopped dispatching after rekey")
 		}
@@ -247,6 +263,153 @@ func TestConnectionPeriodicKeepaliveAndPong(t *testing.T) {
 		t.Fatalf("connection stopped after valid pong: %v", connection.Err())
 	default:
 	}
+}
+
+func TestConnectionKeepalivePongMatchingWrongStaleAndMissing(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		pong        func(*testing.T, *TCPTransport, *Session, uint64)
+		wantTimeout bool
+	}{
+		{name: "matching", pong: func(t *testing.T, tr *TCPTransport, s *Session, nonce uint64) {
+			writeConnectionMessage(t, tr, s, PingPong{IsResponse: true, Nonce: nonce})
+		}},
+		{name: "wrong", pong: func(t *testing.T, tr *TCPTransport, s *Session, nonce uint64) {
+			writeConnectionMessage(t, tr, s, PingPong{IsResponse: true, Nonce: nonce + 1})
+		}, wantTimeout: true},
+		{name: "stale", pong: func(t *testing.T, tr *TCPTransport, s *Session, nonce uint64) {
+			writeConnectionMessage(t, tr, s, PingPong{IsResponse: true, Nonce: nonce - 1})
+		}, wantTimeout: true},
+		{name: "missing", wantTimeout: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			connection, peerSession, peerTransport, cleanup := testConnectionPair(t, ConnectionConfig{
+				KeepaliveInterval: 10 * time.Millisecond,
+				KeepaliveTimeout:  100 * time.Millisecond,
+			})
+			defer cleanup()
+			connection.Start(context.Background())
+			ping, ok := readConnectionMessage(t, peerTransport, peerSession).(*PingPong)
+			if !ok || ping.IsResponse || ping.Nonce == 0 {
+				t.Fatalf("ping = %#v", ping)
+			}
+			if test.pong != nil {
+				test.pong(t, peerTransport, peerSession, ping.Nonce)
+			}
+			if test.wantTimeout {
+				waitConnection(t, connection)
+				if !errors.Is(connection.Err(), ErrKeepaliveTimeout) {
+					t.Fatalf("error = %v", connection.Err())
+				}
+				return
+			}
+			select {
+			case <-connection.Done():
+				t.Fatalf("connection stopped after matching pong: %v", connection.Err())
+			case <-time.After(20 * time.Millisecond):
+			}
+		})
+	}
+}
+
+func TestConnectionSlowHandlerPreservesOrderAndBoundsQueue(t *testing.T) {
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseHandler()
+
+	started := make(chan struct{}, 1)
+	processed := make(chan uint16, 3)
+	connection, peerSession, peerTransport, cleanup := testConnectionPair(t, ConnectionConfig{
+		HandlerQueue: 2,
+		Handler: func(_ context.Context, _ *Connection, message any) error {
+			data := message.(*EncryptedData)
+			if data.StreamID == 1 {
+				started <- struct{}{}
+				<-release
+			}
+			processed <- data.StreamID
+			return nil
+		},
+	})
+	defer cleanup()
+	connection.Start(context.Background())
+	writeConnectionMessage(t, peerTransport, peerSession, EncryptedData{StreamID: 1})
+	select {
+	case <-started:
+	case <-time.After(connectionTestTimeout):
+		releaseHandler()
+		t.Fatal("handler did not start")
+	}
+	writeConnectionMessage(t, peerTransport, peerSession, EncryptedData{StreamID: 2})
+	writeConnectionMessage(t, peerTransport, peerSession, EncryptedData{StreamID: 3})
+
+	writer := make(chan error, 1)
+	go func() {
+		frame, err := peerSession.Send(EncryptedData{StreamID: 4}, 0)
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), connectionTestTimeout)
+			err = peerTransport.WriteFrame(ctx, frame)
+			cancel()
+		}
+		writer <- err
+	}()
+
+	var backpressureErr error
+	select {
+	case <-connection.ctx.Done():
+		backpressureErr = connection.Err()
+	case <-time.After(connectionTestTimeout):
+		backpressureErr = errors.New("handler queue did not apply backpressure")
+	}
+	releaseHandler()
+
+	select {
+	case err := <-writer:
+		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("fourth write: %v", err)
+		}
+	case <-time.After(connectionTestTimeout):
+		t.Error("fourth write did not finish")
+	}
+	waitConnection(t, connection)
+	if backpressureErr != nil && !errors.Is(backpressureErr, ErrHandlerQueueFull) {
+		t.Error(backpressureErr)
+	}
+	if !errors.Is(connection.Err(), ErrHandlerQueueFull) {
+		t.Fatalf("error = %v, want %v", connection.Err(), ErrHandlerQueueFull)
+	}
+	for i, want := range []uint16{1, 2, 3} {
+		select {
+		case got := <-processed:
+			if got != want {
+				t.Fatalf("processed[%d] = %d, want %d", i, got, want)
+			}
+		case <-time.After(connectionTestTimeout):
+			t.Fatalf("missing processed message %d", want)
+		}
+	}
+}
+
+func TestConnectionShutdownCancelsBusyHandler(t *testing.T) {
+	started := make(chan struct{})
+	connection, peerSession, peerTransport, cleanup := testConnectionPair(t, ConnectionConfig{
+		Handler: func(ctx context.Context, _ *Connection, _ any) error {
+			close(started)
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	})
+	defer cleanup()
+	connection.Start(context.Background())
+	writeConnectionMessage(t, peerTransport, peerSession, EncryptedData{})
+	select {
+	case <-started:
+	case <-time.After(connectionTestTimeout):
+		t.Fatal("handler did not start")
+	}
+	_ = peerTransport.Close()
+	waitConnection(t, connection)
 }
 
 func TestConnectionLocalCloseSendsSessionClose(t *testing.T) {

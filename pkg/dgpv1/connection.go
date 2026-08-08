@@ -14,25 +14,31 @@ var (
 	ErrConnectionClosed = errors.New("dgpv1: connection closed")
 	// ErrIdleTimeout indicates that inbound activity did not occur before the idle timeout.
 	ErrIdleTimeout = errors.New("dgpv1: connection idle timeout")
+	// ErrKeepaliveTimeout indicates that an outstanding ping was not acknowledged in time.
+	ErrKeepaliveTimeout = errors.New("dgpv1: keepalive timeout")
 	// ErrOutboundQueueFull indicates that a nonblocking send found the outbound queue full.
 	ErrOutboundQueueFull = errors.New("dgpv1: outbound queue full")
+	// ErrHandlerQueueFull indicates that pending handler work exceeded its bound.
+	ErrHandlerQueueFull = errors.New("dgpv1: handler queue full")
 	// ErrHandlerPanic wraps a panic recovered from a MessageHandler.
 	ErrHandlerPanic = errors.New("dgpv1: handler panic")
 )
 
 // MessageHandler handles one authenticated inbound message. The runtime calls
-// handlers serially from its read loop; returning an error or panicking closes
-// the connection. The context is canceled when the connection terminates.
+// handlers serially on a dedicated worker; returning an error or panicking
+// closes the connection. The context is canceled when the connection terminates.
 type MessageHandler func(context.Context, *Connection, any) error
 
 // ConnectionConfig controls an established connection runtime.
 type ConnectionConfig struct {
 	OutboundQueue     int
+	HandlerQueue      int
 	HandshakeTimeout  time.Duration
 	ReadTimeout       time.Duration
 	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
 	KeepaliveInterval time.Duration
+	KeepaliveTimeout  time.Duration
 	Handler           MessageHandler
 }
 
@@ -59,6 +65,8 @@ type Connection struct {
 	outbound     chan queuedMessage
 	closeRequest chan closeRequest
 	activity     chan struct{}
+	pong         chan uint64
+	handlerQueue chan any
 	done         chan struct{}
 
 	startOnce    sync.Once
@@ -78,6 +86,12 @@ func NewConnection(transport *TCPTransport, session *Session, config ConnectionC
 	if config.OutboundQueue <= 0 {
 		config.OutboundQueue = 16
 	}
+	if config.HandlerQueue <= 0 {
+		config.HandlerQueue = 16
+	}
+	if config.KeepaliveInterval > 0 && config.KeepaliveTimeout <= 0 {
+		config.KeepaliveTimeout = 2 * config.KeepaliveInterval
+	}
 	ctx, cancel := context.WithCancelCause(context.Background())
 	return &Connection{
 		transport:    transport,
@@ -88,6 +102,8 @@ func NewConnection(transport *TCPTransport, session *Session, config ConnectionC
 		outbound:     make(chan queuedMessage, config.OutboundQueue),
 		closeRequest: make(chan closeRequest, 1),
 		activity:     make(chan struct{}, 1),
+		pong:         make(chan uint64, 1),
+		handlerQueue: make(chan any, config.HandlerQueue),
 		done:         make(chan struct{}),
 	}
 }
@@ -96,10 +112,17 @@ func NewConnection(transport *TCPTransport, session *Session, config ConnectionC
 func (c *Connection) Start(ctx context.Context) {
 	c.startOnce.Do(func() {
 		c.started.Store(true)
-		c.wg.Add(3)
+		loops := 3
+		if c.config.Handler != nil {
+			loops++
+		}
+		c.wg.Add(loops)
 		go c.readLoop()
 		go c.writeLoop()
 		go c.maintenanceLoop()
+		if c.config.Handler != nil {
+			go c.handlerLoop()
+		}
 		go func() {
 			select {
 			case <-ctx.Done():
@@ -211,21 +234,30 @@ func (c *Connection) readLoop() {
 			return
 		}
 		c.noteActivity()
+		dispatch := true
 		switch m := message.(type) {
 		case *PingPong:
-			if !m.IsResponse {
-				if err := c.Send(PingPong{IsResponse: true, Nonce: m.Nonce}); err != nil {
-					c.shutdown(err)
-					return
+			dispatch = false
+			if m.IsResponse {
+				select {
+				case c.pong <- m.Nonce:
+				default:
 				}
+			} else if err := c.Send(PingPong{IsResponse: true, Nonce: m.Nonce}); err != nil {
+				c.shutdown(err)
+				return
 			}
 		case *SessionClose:
 			c.shutdown(ErrConnectionClosed)
 			return
 		}
-		if c.config.Handler != nil {
-			if err := c.callHandler(message); err != nil {
-				c.shutdown(err)
+		if dispatch && c.config.Handler != nil {
+			select {
+			case c.handlerQueue <- message:
+			case <-c.ctx.Done():
+				return
+			default:
+				c.shutdown(ErrHandlerQueueFull)
 				return
 			}
 		}
@@ -283,8 +315,8 @@ func (c *Connection) writeMessage(item queuedMessage) error {
 
 func (c *Connection) maintenanceLoop() {
 	defer c.wg.Done()
-	var idleTimer, keepaliveTimer *time.Timer
-	var idle, keepalive <-chan time.Time
+	var idleTimer, keepaliveTimer, pongTimer *time.Timer
+	var idle, keepalive, pongDeadline <-chan time.Time
 	if c.config.IdleTimeout > 0 {
 		idleTimer = time.NewTimer(c.config.IdleTimeout)
 		idle = idleTimer.C
@@ -295,23 +327,82 @@ func (c *Connection) maintenanceLoop() {
 		keepalive = keepaliveTimer.C
 		defer keepaliveTimer.Stop()
 	}
+	var outstanding uint64
 
 	for {
 		select {
 		case <-c.ctx.Done():
+			if pongTimer != nil {
+				pongTimer.Stop()
+			}
 			return
 		case <-c.activity:
 			resetTimer(idleTimer, c.config.IdleTimeout)
+		case nonce := <-c.pong:
+			if outstanding != 0 && nonce == outstanding {
+				outstanding = 0
+				if pongTimer != nil {
+					if !pongTimer.Stop() {
+						select {
+						case <-pongTimer.C:
+						default:
+						}
+					}
+					pongDeadline = nil
+				}
+				resetTimer(keepaliveTimer, c.config.KeepaliveInterval)
+			}
 		case <-keepalive:
-			nonce := c.pingNonce.Add(1)
-			if err := c.Send(PingPong{Nonce: nonce}); err != nil {
+			if outstanding != 0 {
+				continue
+			}
+			outstanding = c.pingNonce.Add(1)
+			if err := c.Send(PingPong{Nonce: outstanding}); err != nil {
 				c.shutdown(err)
 				return
 			}
-			resetTimer(keepaliveTimer, c.config.KeepaliveInterval)
+			pongTimer = time.NewTimer(c.config.KeepaliveTimeout)
+			pongDeadline = pongTimer.C
+			keepalive = nil
+		case <-pongDeadline:
+			c.shutdown(ErrKeepaliveTimeout)
+			return
 		case <-idle:
 			_ = c.closeGracefully(SessionClose{Code: 3, Reason: "idle timeout"}, ErrIdleTimeout)
 			return
+		}
+	}
+}
+
+func (c *Connection) handlerLoop() {
+	defer c.wg.Done()
+	for {
+		select {
+		case message := <-c.handlerQueue:
+			if err := c.callHandler(message); err != nil {
+				c.shutdown(err)
+				return
+			}
+		default:
+		}
+
+		select {
+		case message := <-c.handlerQueue:
+			if err := c.callHandler(message); err != nil {
+				c.shutdown(err)
+				return
+			}
+		case <-c.ctx.Done():
+			for {
+				select {
+				case message := <-c.handlerQueue:
+					if err := c.callHandler(message); err != nil {
+						return
+					}
+				default:
+					return
+				}
+			}
 		}
 	}
 }
