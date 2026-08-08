@@ -6,11 +6,16 @@ import (
 )
 
 var (
-	ErrFrameTooShort       = errors.New("dgpv1: frame too short")
+	// ErrFrameTooShort indicates that input cannot contain a complete fixed header.
+	ErrFrameTooShort = errors.New("dgpv1: frame too short")
+	// ErrFrameLengthMismatch indicates that body lengths differ from the header declarations.
 	ErrFrameLengthMismatch = errors.New("dgpv1: frame length does not match header")
-	ErrPayloadTooLarge     = errors.New("dgpv1: payload exceeds maximum frame size")
-	ErrTagLength           = errors.New("dgpv1: AEAD tag must be 16 bytes")
-	ErrPaddingLength       = errors.New("dgpv1: padding length exceeds 255 bytes")
+	// ErrPayloadTooLarge indicates that a payload would exceed MaxFrameSize.
+	ErrPayloadTooLarge = errors.New("dgpv1: payload exceeds maximum frame size")
+	// ErrTagLength indicates that an outer AEAD tag has an invalid length.
+	ErrTagLength = errors.New("dgpv1: AEAD tag must be 16 bytes")
+	// ErrPaddingLength indicates that padding exceeds the uint8 wire limit.
+	ErrPaddingLength = errors.New("dgpv1: padding length exceeds 255 bytes")
 )
 
 // Frame is a complete plaintext-header DGPv1 frame. Payload contains the
@@ -90,7 +95,8 @@ func (f Frame) ValidateReceive() error {
 	return f.validateLengths()
 }
 
-// MarshalBinary encodes f in DGPv1 wire format.
+// MarshalBinary encodes f in canonical DGPv1 wire order: 40-byte header,
+// payload, optional 16-byte AEAD tag, then padding. Returned storage is owned.
 func (f Frame) MarshalBinary() ([]byte, error) {
 	if err := f.Validate(); err != nil {
 		return nil, err

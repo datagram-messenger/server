@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding"
-	"encoding/binary"
 	"io"
 	"net"
 	"reflect"
@@ -191,12 +190,9 @@ func fuzzMessage(kind MessageType) encoding.BinaryUnmarshaler {
 func FuzzTCPTransportReadFrame(f *testing.F) {
 	frame, _ := NewFrame(MessageTypeEncryptedData, [16]byte{1}, 1, []byte("seed"), make([]byte, AEADTagSize), nil)
 	wire, _ := frame.MarshalBinary()
-	packet := make([]byte, 4+len(wire))
-	binary.LittleEndian.PutUint32(packet, uint32(len(wire)))
-	copy(packet[4:], wire)
-	f.Add(packet)
-	f.Add([]byte{39, 0, 0, 0})
-	f.Add([]byte{0, 0, 1, 0})
+	f.Add(wire)
+	f.Add(wire[:HeaderSize-1])
+	f.Add([]byte("DGP1"))
 
 	f.Fuzz(func(t *testing.T, packet []byte) {
 		conn := &fuzzReadConn{Reader: bytes.NewReader(packet)}

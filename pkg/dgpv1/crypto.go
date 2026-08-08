@@ -12,22 +12,31 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
+// KeySize is the required DGPv1 traffic-key length in bytes.
 const KeySize = 32
 
 var (
-	ErrInvalidKeySize    = errors.New("dgpv1: invalid key size")
+	// ErrInvalidKeySize indicates that a traffic key is not KeySize bytes.
+	ErrInvalidKeySize = errors.New("dgpv1: invalid key size")
+	// ErrUnsupportedCipher indicates that a cipher suite is not implemented.
 	ErrUnsupportedCipher = errors.New("dgpv1: unsupported cipher suite")
-	ErrUnencryptedType   = errors.New("dgpv1: message type is not encrypted data")
-	ErrInvalidSequence   = errors.New("dgpv1: encrypted frame sequence must be nonzero")
-	ErrInvalidSessionID  = errors.New("dgpv1: encrypted frame session ID must be nonzero")
-	ErrAuthentication    = errors.New("dgpv1: authentication failed")
+	// ErrUnencryptedType indicates that a frame type is outside the encrypted-message range.
+	ErrUnencryptedType = errors.New("dgpv1: message type is not encrypted data")
+	// ErrInvalidSequence indicates that an encrypted frame uses sequence zero.
+	ErrInvalidSequence = errors.New("dgpv1: encrypted frame sequence must be nonzero")
+	// ErrInvalidSessionID indicates that an encrypted frame uses the all-zero session ID.
+	ErrInvalidSessionID = errors.New("dgpv1: encrypted frame session ID must be nonzero")
+	// ErrAuthentication indicates that authenticated decryption failed.
+	ErrAuthentication = errors.New("dgpv1: authentication failed")
 )
 
 // CipherSuite identifies a DGPv1 data-frame AEAD.
 type CipherSuite uint8
 
 const (
+	// CipherChaCha20Poly1305 selects ChaCha20-Poly1305.
 	CipherChaCha20Poly1305 CipherSuite = iota + 1
+	// CipherAES256GCM selects AES-256-GCM.
 	CipherAES256GCM
 )
 

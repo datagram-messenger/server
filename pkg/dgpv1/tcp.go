@@ -2,7 +2,6 @@ package dgpv1
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -13,13 +12,16 @@ import (
 
 const minFrameSize = HeaderSize
 
-// TCPTransport carries length-prefixed DGPv1 frames over a stream connection.
+// TCPTransport carries canonical DGPv1 frames directly over a TCP stream.
+// Frames have no transport length prefix. One read and one write may proceed
+// concurrently; reads are serialized with reads and writes with writes.
 type TCPTransport struct {
 	conn  net.Conn
 	read  sync.Mutex
 	write sync.Mutex
 }
 
+// NewTCPTransport wraps conn and panics if conn is nil.
 func NewTCPTransport(conn net.Conn) *TCPTransport {
 	if conn == nil {
 		panic("dgpv1: nil TCP connection")
@@ -27,6 +29,8 @@ func NewTCPTransport(conn net.Conn) *TCPTransport {
 	return &TCPTransport{conn: conn}
 }
 
+// ReadFrame blocks until one complete frame is read or ctx is canceled.
+// It derives the body length from the fixed DGPv1 header, not a length prefix.
 func (t *TCPTransport) ReadFrame(ctx context.Context) (Frame, error) {
 	t.read.Lock()
 	defer t.read.Unlock()
@@ -37,20 +41,26 @@ func (t *TCPTransport) ReadFrame(ctx context.Context) (Frame, error) {
 	}
 	defer stop()
 
-	var prefix [4]byte
-	if _, err := io.ReadFull(t.conn, prefix[:]); err != nil {
+	headerWire := make([]byte, HeaderSize)
+	if _, err := io.ReadFull(t.conn, headerWire); err != nil {
 		return Frame{}, transportError(ctx, err)
 	}
-	n := binary.LittleEndian.Uint32(prefix[:])
-	if n < minFrameSize {
-		return Frame{}, fmt.Errorf("%w: got %d, want at least %d", ErrTransportFrameTooShort, n, minFrameSize)
+
+	var header Header
+	if err := header.UnmarshalBinary(headerWire); err != nil {
+		return Frame{}, err
 	}
-	if n > MaxFrameSize {
-		return Frame{}, fmt.Errorf("%w: got %d, maximum %d", ErrTransportFrameTooLarge, n, MaxFrameSize)
+	frameSize := header.FrameSize()
+	if frameSize < minFrameSize {
+		return Frame{}, fmt.Errorf("%w: got %d, want at least %d", ErrTransportFrameTooShort, frameSize, minFrameSize)
+	}
+	if frameSize > MaxFrameSize {
+		return Frame{}, fmt.Errorf("%w: got %d, maximum %d", ErrTransportFrameTooLarge, frameSize, MaxFrameSize)
 	}
 
-	wire := make([]byte, int(n))
-	if _, err := io.ReadFull(t.conn, wire); err != nil {
+	wire := make([]byte, int(frameSize))
+	copy(wire, headerWire)
+	if _, err := io.ReadFull(t.conn, wire[HeaderSize:]); err != nil {
 		return Frame{}, transportError(ctx, err)
 	}
 	var frame Frame
@@ -60,6 +70,8 @@ func (t *TCPTransport) ReadFrame(ctx context.Context) (Frame, error) {
 	return frame, nil
 }
 
+// WriteFrame validates and writes one complete frame, blocking until all bytes
+// are written or ctx is canceled.
 func (t *TCPTransport) WriteFrame(ctx context.Context, frame Frame) error {
 	wire, err := frame.MarshalBinary()
 	if err != nil {
@@ -72,10 +84,6 @@ func (t *TCPTransport) WriteFrame(ctx context.Context, frame Frame) error {
 		return fmt.Errorf("%w: got %d, maximum %d", ErrTransportFrameTooLarge, len(wire), MaxFrameSize)
 	}
 
-	packet := make([]byte, 4+len(wire))
-	binary.LittleEndian.PutUint32(packet[:4], uint32(len(wire)))
-	copy(packet[4:], wire)
-
 	t.write.Lock()
 	defer t.write.Unlock()
 	stop, err := t.watchContext(ctx, false)
@@ -84,19 +92,20 @@ func (t *TCPTransport) WriteFrame(ctx context.Context, frame Frame) error {
 	}
 	defer stop()
 
-	for len(packet) != 0 {
-		n, err := t.conn.Write(packet)
+	for len(wire) != 0 {
+		n, err := t.conn.Write(wire)
 		if err != nil {
 			return transportError(ctx, err)
 		}
 		if n == 0 {
 			return io.ErrShortWrite
 		}
-		packet = packet[n:]
+		wire = wire[n:]
 	}
 	return nil
 }
 
+// Close closes the underlying connection.
 func (t *TCPTransport) Close() error {
 	if err := t.conn.Close(); err != nil {
 		if errors.Is(err, net.ErrClosed) {

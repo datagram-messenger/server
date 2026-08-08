@@ -13,10 +13,14 @@ import (
 )
 
 var (
-	ErrSessionClosed     = errors.New("dgpv1: session is closed")
-	ErrWrongSession      = errors.New("dgpv1: frame belongs to another session")
+	// ErrSessionClosed indicates an operation on a closed or nil session.
+	ErrSessionClosed = errors.New("dgpv1: session is closed")
+	// ErrWrongSession indicates that a frame carries a different session ID.
+	ErrWrongSession = errors.New("dgpv1: frame belongs to another session")
+	// ErrSequenceExhausted indicates that no further send sequence can be allocated.
 	ErrSequenceExhausted = errors.New("dgpv1: send sequence exhausted")
-	ErrMessageType       = errors.New("dgpv1: message does not match encrypted frame type")
+	// ErrMessageType indicates that a value or frame type is unavailable through the strict-MVP Session API.
+	ErrMessageType = errors.New("dgpv1: message does not match encrypted frame type")
 )
 
 // HandshakeSecrets is the directional material needed to open a session.
@@ -31,7 +35,9 @@ func (r HandshakeResult) Secrets() HandshakeSecrets {
 	return HandshakeSecrets{SessionID: r.SessionID, SendKey: r.SendKey, ReceiveKey: r.ReceiveKey}
 }
 
-// Session owns directional codecs, sequence allocation, and receive replay state.
+// Session owns directional codecs, sequence allocation, and receive replay
+// state. Its exported methods are safe for concurrent use. The Session API is
+// strict MVP: it rejects post-MVP message type 0x07.
 type Session struct {
 	sessionID [16]byte
 	suite     CipherSuite
@@ -132,7 +138,9 @@ func (s *Session) Closed() bool {
 	return s.closed
 }
 
-// Send marshals and encrypts a typed DGPv1 message.
+// Send marshals and encrypts a strict-MVP typed message. It is safe for
+// concurrent use and may return an automatically generated RekeyInit frame
+// instead of the supplied message when a rekey boundary is reached.
 func (s *Session) Send(message any, padLength uint8) (Frame, error) {
 	if s == nil {
 		return Frame{}, ErrSessionClosed
@@ -151,8 +159,12 @@ func (s *Session) Send(message any, padLength uint8) (Frame, error) {
 	return s.sendPayload(messageType, plaintext, padLength, observedEpoch)
 }
 
-// SendPayload encrypts an already encoded payload of an encrypted message type.
+// SendPayload encrypts a copied, already encoded payload of an MVP encrypted
+// message type. Message type 0x07 and handshake types are rejected.
 func (s *Session) SendPayload(messageType MessageType, plaintext []byte, padLength uint8) (Frame, error) {
+	if messageType == MessageTypeResumptionTicket {
+		return Frame{}, fmt.Errorf("%w: 0x%02x is post-MVP", ErrMessageType, messageType)
+	}
 	if s == nil {
 		return Frame{}, ErrSessionClosed
 	}
@@ -248,6 +260,10 @@ func (s *Session) startRekeyLocked(padLength uint8) (Frame, error) {
 }
 
 // Receive authenticates a frame, commits its sequence, and decodes its message.
+// Reserved inbound header flags are ignored. Authentication failures do not
+// commit replay state. RekeyInit is fully decoded and validated before its key,
+// epoch, replay, and grace state are committed atomically. For other message
+// types, a later payload-decoding error occurs after the sequence is committed.
 func (s *Session) Receive(frame Frame) (any, error) {
 	plaintext, err := s.ReceivePayload(frame)
 	if err != nil {
@@ -263,8 +279,13 @@ func (s *Session) Receive(frame Frame) (any, error) {
 	return message, nil
 }
 
-// ReceivePayload performs replay Check, AEAD authentication, then replay Commit.
+// ReceivePayload validates and authenticates a frame before committing any
+// receive state. Rekey validation, replay advancement, and the key transition
+// are committed together while receiveMu is held.
 func (s *Session) ReceivePayload(frame Frame) ([]byte, error) {
+	if frame.Header.MessageType == MessageTypeResumptionTicket {
+		return nil, fmt.Errorf("%w: 0x%02x is post-MVP", ErrMessageType, frame.Header.MessageType)
+	}
 	if s == nil {
 		return nil, ErrSessionClosed
 	}
@@ -280,97 +301,121 @@ func (s *Session) ReceivePayload(frame Frame) ([]byte, error) {
 	if s.closed {
 		return nil, ErrSessionClosed
 	}
-	s.expireGraceLocked()
-	plaintext, current, err := s.decryptEpochLocked(frame)
+
+	candidate, err := s.decryptEpochLocked(frame)
 	if err != nil {
 		return nil, err
 	}
-	if !current && frame.Header.MessageType == MessageTypeRekeyInit {
+	if !candidate.current && frame.Header.MessageType == MessageTypeRekeyInit {
 		return nil, fmt.Errorf("%w: rekey from previous epoch", ErrInvalidEpoch)
 	}
-	if current && frame.Header.MessageType == MessageTypeRekeyInit {
+
+	if candidate.current && frame.Header.MessageType == MessageTypeRekeyInit {
 		var init RekeyInit
-		if err := init.UnmarshalBinary(plaintext); err != nil {
+		if err := init.UnmarshalBinary(candidate.plaintext); err != nil {
 			return nil, err
 		}
-		if err := s.acceptRekeyLocked(init); err != nil {
+		nextKey, nextCodec, err := s.prepareRekeyLocked(init)
+		if err != nil {
 			return nil, err
 		}
-	} else if current && s.previousReceive != nil {
-		if s.graceRemaining > 0 {
-			s.graceRemaining--
+
+		committedReplay := s.replay
+		if err := committedReplay.Commit(candidate.token); err != nil {
+			return nil, err
 		}
+		s.previousReceive, s.previousReplay = s.receive, committedReplay
+		s.receive, s.receiveKey, s.receiveEpoch = nextCodec, nextKey, init.Epoch
+		s.replay = ReplayWindow{}
+		s.graceRemaining = s.graceFrames
+		s.graceUntil = s.now().Add(s.gracePeriod)
 		s.expireGraceLocked()
+		return candidate.plaintext, nil
 	}
-	return plaintext, nil
+
+	if candidate.current {
+		committedReplay := s.replay
+		if err := committedReplay.Commit(candidate.token); err != nil {
+			return nil, err
+		}
+		s.replay = committedReplay
+		if s.previousReceive != nil {
+			if s.graceRemaining > 0 {
+				s.graceRemaining--
+			}
+			s.expireGraceLocked()
+		}
+	} else {
+		committedReplay := s.previousReplay
+		if err := committedReplay.Commit(candidate.token); err != nil {
+			return nil, err
+		}
+		s.previousReplay = committedReplay
+	}
+	return candidate.plaintext, nil
 }
 
-func (s *Session) decryptEpochLocked(frame Frame) ([]byte, bool, error) {
+type receiveCandidate struct {
+	plaintext []byte
+	current   bool
+	token     ReplayToken
+}
+
+func (s *Session) decryptEpochLocked(frame Frame) (receiveCandidate, error) {
 	currentToken, currentCheck := s.replay.Check(frame.Header.Sequence)
 	if currentCheck == nil {
 		plaintext, err := s.receive.Decrypt(frame)
 		if err == nil {
-			if err := s.replay.Commit(currentToken); err != nil {
-				return nil, true, err
-			}
-			return plaintext, true, nil
+			return receiveCandidate{plaintext: plaintext, current: true, token: currentToken}, nil
 		}
 		if !errors.Is(err, ErrAuthentication) {
-			return nil, true, err
+			return receiveCandidate{}, err
 		}
 	}
-	if s.previousReceive != nil {
+
+	previousAvailable := s.previousReceive != nil && s.graceRemaining > 0 &&
+		s.gracePeriod > 0 && s.now().Before(s.graceUntil)
+	if previousAvailable {
 		previousToken, previousCheck := s.previousReplay.Check(frame.Header.Sequence)
 		if previousCheck == nil || frame.Header.MessageType == MessageTypeRekeyInit {
 			plaintext, err := s.previousReceive.Decrypt(frame)
 			if err == nil {
-				if previousCheck == nil {
-					if err := s.previousReplay.Commit(previousToken); err != nil {
-						return nil, false, err
-					}
-				}
-				return plaintext, false, nil
+				return receiveCandidate{plaintext: plaintext, current: false, token: previousToken}, nil
 			}
 			if !errors.Is(err, ErrAuthentication) {
-				return nil, false, err
+				return receiveCandidate{}, err
 			}
 		}
 		if currentCheck != nil && previousCheck != nil {
-			return nil, true, currentCheck
+			return receiveCandidate{}, currentCheck
 		}
 	}
 	if currentCheck != nil {
-		return nil, true, currentCheck
+		return receiveCandidate{}, currentCheck
 	}
-	return nil, true, ErrAuthentication
+	return receiveCandidate{}, ErrAuthentication
 }
 
-func (s *Session) acceptRekeyLocked(init RekeyInit) error {
+func (s *Session) prepareRekeyLocked(init RekeyInit) ([KeySize]byte, *Codec, error) {
 	if s.receiveEpoch == math.MaxUint32 {
-		return ErrEpochExhausted
+		return [KeySize]byte{}, nil, ErrEpochExhausted
 	}
 	if init.Epoch != s.receiveEpoch+1 {
-		return fmt.Errorf("%w: got %d, want %d", ErrInvalidEpoch, init.Epoch, s.receiveEpoch+1)
+		return [KeySize]byte{}, nil, fmt.Errorf("%w: got %d, want %d", ErrInvalidEpoch, init.Epoch, s.receiveEpoch+1)
 	}
 	expected, err := (&RekeyState{Epoch: s.receiveEpoch}).ComputeKeyConfirm(s.receiveKey[:], init.Epoch)
 	if err != nil {
-		return err
+		return [KeySize]byte{}, nil, err
 	}
 	if !hmac.Equal(expected[:], init.KeyConfirm[:]) {
-		return ErrKeyConfirmFailed
+		return [KeySize]byte{}, nil, ErrKeyConfirmFailed
 	}
 	nextKey := deriveNextTrafficKey(s.receiveKey)
 	nextCodec, err := NewCodec(s.suite, nextKey[:])
 	if err != nil {
-		return err
+		return [KeySize]byte{}, nil, err
 	}
-	s.previousReceive, s.previousReplay = s.receive, s.replay
-	s.receive, s.receiveKey, s.receiveEpoch = nextCodec, nextKey, init.Epoch
-	s.replay = ReplayWindow{}
-	s.graceRemaining = s.graceFrames
-	s.graceUntil = s.now().Add(s.gracePeriod)
-	s.expireGraceLocked()
-	return nil
+	return nextKey, nextCodec, nil
 }
 
 func (s *Session) expireGraceLocked() {
@@ -400,8 +445,6 @@ func outboundMessage(message any) (MessageType, encoding.BinaryMarshaler, error)
 		messageType = MessageTypeSessionClose
 	case Ack, *Ack:
 		messageType = MessageTypeAck
-	case ResumptionTicket, *ResumptionTicket:
-		messageType = MessageTypeResumptionTicket
 	case RekeyInit, *RekeyInit:
 		messageType = MessageTypeRekeyInit
 	case ErrorMessage, *ErrorMessage:
@@ -426,8 +469,6 @@ func newInboundMessage(messageType MessageType) (encoding.BinaryUnmarshaler, err
 		return &SessionClose{}, nil
 	case MessageTypeAck:
 		return &Ack{}, nil
-	case MessageTypeResumptionTicket:
-		return &ResumptionTicket{}, nil
 	case MessageTypeRekeyInit:
 		return &RekeyInit{}, nil
 	case MessageTypeError:

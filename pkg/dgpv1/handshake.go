@@ -14,6 +14,7 @@ import (
 const noiseKeySize = 32
 
 var (
+	// ErrHandshake indicates a failed or out-of-order Noise handshake operation.
 	ErrHandshake = errors.New("dgpv1: handshake failed")
 	noiseSuite   = noise.NewCipherSuite(noise.DH25519, noise.CipherChaChaPoly, noise.HashSHA256)
 )
@@ -91,7 +92,9 @@ const (
 	stepFailed
 )
 
-// Handshake executes one side of Noise_XX_25519_ChaChaPoly_SHA256.
+// Handshake executes one side of the strict-MVP
+// Noise_XX_25519_ChaChaPoly_SHA256 exchange. A Handshake must be driven in
+// flight order and is not safe for concurrent use.
 type Handshake struct {
 	state        *noise.HandshakeState
 	role         handshakeRole

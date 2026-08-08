@@ -10,13 +10,19 @@ import (
 )
 
 var (
-	ErrConnectionClosed  = errors.New("dgpv1: connection closed")
-	ErrIdleTimeout       = errors.New("dgpv1: connection idle timeout")
+	// ErrConnectionClosed indicates that the connection runtime has terminated.
+	ErrConnectionClosed = errors.New("dgpv1: connection closed")
+	// ErrIdleTimeout indicates that inbound activity did not occur before the idle timeout.
+	ErrIdleTimeout = errors.New("dgpv1: connection idle timeout")
+	// ErrOutboundQueueFull indicates that a nonblocking send found the outbound queue full.
 	ErrOutboundQueueFull = errors.New("dgpv1: outbound queue full")
-	ErrHandlerPanic      = errors.New("dgpv1: handler panic")
+	// ErrHandlerPanic wraps a panic recovered from a MessageHandler.
+	ErrHandlerPanic = errors.New("dgpv1: handler panic")
 )
 
-// MessageHandler handles one authenticated inbound message.
+// MessageHandler handles one authenticated inbound message. The runtime calls
+// handlers serially from its read loop; returning an error or panicking closes
+// the connection. The context is canceled when the connection terminates.
 type MessageHandler func(context.Context, *Connection, any) error
 
 // ConnectionConfig controls an established connection runtime.
@@ -41,7 +47,8 @@ type closeRequest struct {
 	result  chan error
 }
 
-// Connection runs an already-established Session over a TCPTransport.
+// Connection runs an already-established Session over a TCPTransport. Its
+// exported methods are safe for concurrent use.
 type Connection struct {
 	transport *TCPTransport
 	session   *Session
@@ -108,10 +115,12 @@ func (c *Connection) Start(ctx context.Context) {
 	})
 }
 
-// Send queues a message without waiting for network I/O.
+// Send queues a message without waiting for network I/O. It returns
+// ErrOutboundQueueFull rather than blocking when the queue is full.
 func (c *Connection) Send(message any) error { return c.SendPadded(message, 0) }
 
-// SendPadded queues a message with encrypted padding.
+// SendPadded queues a message with the requested encrypted-frame padding. It
+// does not wait for network I/O and returns ErrOutboundQueueFull on backpressure.
 func (c *Connection) SendPadded(message any, padLength uint8) error {
 	if c.closing.Load() {
 		return ErrConnectionClosed

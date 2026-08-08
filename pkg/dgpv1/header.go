@@ -1,4 +1,3 @@
-// Package dgpv1 implements Datagram Protocol Version 1 framing.
 package dgpv1
 
 import (
@@ -22,23 +21,32 @@ var (
 	// Magic is the fixed plaintext header prefix.
 	Magic = [4]byte{'D', 'G', 'P', '1'}
 
-	ErrHeaderTooShort     = errors.New("dgpv1: header too short")
-	ErrInvalidMagic       = errors.New("dgpv1: invalid magic")
+	// ErrHeaderTooShort indicates that input is shorter than HeaderSize.
+	ErrHeaderTooShort = errors.New("dgpv1: header too short")
+	// ErrInvalidMagic indicates that a header does not begin with Magic.
+	ErrInvalidMagic = errors.New("dgpv1: invalid magic")
+	// ErrUnsupportedVersion indicates that a header version is not 0x01.
 	ErrUnsupportedVersion = errors.New("dgpv1: unsupported version")
-	ErrReservedFlags      = errors.New("dgpv1: reserved flag bits set")
-	ErrPaddingFlag        = errors.New("dgpv1: padding flag does not match pad length")
-	ErrFrameTooLarge      = errors.New("dgpv1: frame exceeds maximum size")
+	// ErrReservedFlags indicates that an outbound header uses flags other than padding.
+	ErrReservedFlags = errors.New("dgpv1: reserved flag bits set")
+	// ErrPaddingFlag indicates that FlagPadding and PadLength disagree.
+	ErrPaddingFlag = errors.New("dgpv1: padding flag does not match pad length")
+	// ErrFrameTooLarge indicates that header lengths describe a frame exceeding MaxFrameSize.
+	ErrFrameTooLarge = errors.New("dgpv1: frame exceeds maximum size")
 )
 
 // Flags controls optional DGPv1 frame behavior.
 type Flags uint8
 
 const (
+	// FlagObfuscated is reserved for post-MVP and MUST NOT be sent by MVP sessions.
 	FlagObfuscated Flags = 1 << iota
+	// FlagPadding is the only optional flag supported by the MVP profile.
 	FlagPadding
+	// FlagZeroRTT is reserved for post-MVP and MUST NOT be sent by MVP sessions.
 	FlagZeroRTT
 
-	knownFlags = FlagObfuscated | FlagPadding | FlagZeroRTT
+	mvpSenderFlags = FlagPadding
 )
 
 // MessageType identifies the payload carried by a frame.
@@ -51,9 +59,10 @@ const (
 	MessageTypePingPong          MessageType = 0x04
 	MessageTypeSessionClose      MessageType = 0x05
 	MessageTypeAck               MessageType = 0x06
-	MessageTypeResumptionTicket  MessageType = 0x07
-	MessageTypeRekeyInit         MessageType = 0x08
-	MessageTypeError             MessageType = 0x09
+	// MessageTypeResumptionTicket is reserved for post-MVP and rejected by Session.
+	MessageTypeResumptionTicket MessageType = 0x07
+	MessageTypeRekeyInit        MessageType = 0x08
+	MessageTypeError            MessageType = 0x09
 )
 
 // Header is the 40-byte fixed DGPv1 frame header. Reserved wire fields are
@@ -90,8 +99,9 @@ func (h Header) hasAEADTag() bool {
 	return h.MessageType != MessageTypeHandshakeInit && h.MessageType != MessageTypeHandshakeResponse
 }
 
-// FrameSize returns the complete frame size, excluding any transport prefix.
-// Handshake frames carry Noise messages directly and have no outer AEAD tag.
+// FrameSize returns the complete wire-frame size. DGPv1 has no transport
+// prefix. Handshake frames carry Noise messages directly and have no outer
+// 16-byte AEAD tag.
 func (h Header) FrameSize() uint64 {
 	size := uint64(HeaderSize) + uint64(h.PayloadLength) + uint64(h.PadLength)
 	if h.hasAEADTag() {
@@ -118,8 +128,8 @@ func (h Header) Validate() error {
 	if err := h.validateCommon(); err != nil {
 		return err
 	}
-	if h.Flags&^knownFlags != 0 {
-		return fmt.Errorf("%w: 0x%02x", ErrReservedFlags, uint8(h.Flags&^knownFlags))
+	if h.Flags&^mvpSenderFlags != 0 {
+		return fmt.Errorf("%w: 0x%02x", ErrReservedFlags, uint8(h.Flags&^mvpSenderFlags))
 	}
 	return nil
 }

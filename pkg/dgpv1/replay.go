@@ -9,10 +9,14 @@ const (
 )
 
 var (
-	ErrReplayZero      = errors.New("dgpv1: sequence number is zero")
+	// ErrReplayZero indicates that sequence zero was presented to the replay window.
+	ErrReplayZero = errors.New("dgpv1: sequence number is zero")
+	// ErrReplayDuplicate indicates that a sequence is already recorded.
 	ErrReplayDuplicate = errors.New("dgpv1: duplicate sequence number")
-	ErrReplayTooOld    = errors.New("dgpv1: sequence number is outside replay window")
-	ErrReplayStale     = errors.New("dgpv1: stale replay commit token")
+	// ErrReplayTooOld indicates that a sequence precedes the tracked replay window.
+	ErrReplayTooOld = errors.New("dgpv1: sequence number is outside replay window")
+	// ErrReplayStale indicates that a ReplayToken was invalidated by another commit.
+	ErrReplayStale = errors.New("dgpv1: stale replay commit token")
 )
 
 // ReplayWindow tracks authenticated receive sequences. It is session-owned

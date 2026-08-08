@@ -10,15 +10,22 @@ import (
 )
 
 const (
-	DefaultRekeyFrameLimit  = uint64(1) << 32
-	DefaultRekeyInterval    = 10 * time.Minute
+	// DefaultRekeyFrameLimit is the default number of sent frames per key epoch.
+	DefaultRekeyFrameLimit = uint64(1) << 32
+	// DefaultRekeyInterval is the default maximum duration of a send-key epoch.
+	DefaultRekeyInterval = 10 * time.Minute
+	// DefaultRekeyGraceFrames is the default current-epoch frame budget before the previous receive key expires.
 	DefaultRekeyGraceFrames = uint64(ReplayWindowSize)
+	// DefaultRekeyGracePeriod is the default time limit for accepting previous-epoch frames.
 	DefaultRekeyGracePeriod = 30 * time.Second
 )
 
 var (
-	ErrInvalidEpoch     = errors.New("dgpv1: invalid rekey epoch")
-	ErrEpochExhausted   = errors.New("dgpv1: rekey epoch exhausted")
+	// ErrInvalidEpoch indicates that a rekey epoch is not the immediate successor.
+	ErrInvalidEpoch = errors.New("dgpv1: invalid rekey epoch")
+	// ErrEpochExhausted indicates that the uint32 rekey epoch cannot advance.
+	ErrEpochExhausted = errors.New("dgpv1: rekey epoch exhausted")
+	// ErrKeyConfirmFailed indicates that a RekeyInit confirmation does not match.
 	ErrKeyConfirmFailed = errors.New("dgpv1: rekey confirmation failed")
 )
 
@@ -28,8 +35,11 @@ type RekeyState struct {
 	Epoch uint32
 }
 
+// NewRekeyState returns directional rekey state at handshake epoch one.
 func NewRekeyState() *RekeyState { return &RekeyState{Epoch: 1} }
 
+// ComputeKeyConfirm returns the HMAC-SHA256 confirmation for the immediately
+// following epoch. It rejects skipped epochs and exhausted state.
 func (r *RekeyState) ComputeKeyConfirm(secret []byte, epoch uint32) ([32]byte, error) {
 	if r == nil || r.Epoch == ^uint32(0) {
 		return [32]byte{}, ErrEpochExhausted

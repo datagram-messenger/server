@@ -11,21 +11,32 @@ import (
 
 const staticKeySize = 32
 
+// ErrStaticKeyRequired reports that DGP_STATIC_KEY was not set.
 var ErrStaticKeyRequired = errors.New("config: DGP_STATIC_KEY is required")
 
 // Config contains the runtime settings for the DGPv1 TCP server.
 type Config struct {
-	Address           string
-	StaticKey         [staticKeySize]byte
-	HandshakeTimeout  time.Duration
-	ReadTimeout       time.Duration
-	WriteTimeout      time.Duration
-	IdleTimeout       time.Duration
+	// Address is the TCP listen address from DGP_ADDRESS.
+	Address string
+	// StaticKey is the 32-byte server static key decoded from DGP_STATIC_KEY.
+	StaticKey [staticKeySize]byte
+	// HandshakeTimeout limits completion of the initial protocol handshake.
+	HandshakeTimeout time.Duration
+	// ReadTimeout limits each transport read operation.
+	ReadTimeout time.Duration
+	// WriteTimeout limits each transport write operation.
+	WriteTimeout time.Duration
+	// IdleTimeout limits elapsed time without inbound activity.
+	IdleTimeout time.Duration
+	// KeepaliveInterval controls how often the connection runtime sends keepalive messages.
 	KeepaliveInterval time.Duration
-	OutboundQueue     int
+	// OutboundQueue is the capacity of the connection runtime's outbound queue.
+	OutboundQueue int
 }
 
-// Load reads configuration from environment variables.
+// Load reads configuration from environment variables. DGP_STATIC_KEY is
+// required as exactly 32 hex-encoded bytes; invalid or non-positive timeout and
+// queue values are rejected.
 func Load() (Config, error) {
 	cfg := Config{
 		Address:           envOr("DGP_ADDRESS", ":8090"),

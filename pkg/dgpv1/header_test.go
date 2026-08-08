@@ -65,7 +65,7 @@ func TestHeaderValidate(t *testing.T) {
 		wantErr error
 	}{
 		{name: "valid", header: Header{Version: Version}},
-		{name: "valid known flags", header: Header{Version: Version, Flags: FlagObfuscated | FlagZeroRTT}},
+		{name: "reserved post-MVP flags", header: Header{Version: Version, Flags: FlagObfuscated | FlagZeroRTT}, wantErr: ErrReservedFlags},
 		{name: "valid maximum frame", header: Header{Version: Version, PayloadLength: maxPayload}},
 		{name: "unsupported version", header: Header{Version: Version + 1}, wantErr: ErrUnsupportedVersion},
 		{name: "reserved flag", header: Header{Version: Version, Flags: 0x80}, wantErr: ErrReservedFlags},
@@ -92,7 +92,6 @@ func TestHeaderMarshalUnmarshalRoundTrip(t *testing.T) {
 		0x1020,
 		5,
 	)
-	want.Flags |= FlagObfuscated | FlagZeroRTT
 
 	data, err := want.MarshalBinary()
 	if err != nil {
@@ -111,7 +110,7 @@ func TestHeaderMarshalBinaryWireLayout(t *testing.T) {
 	sessionID := [16]byte{0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f}
 	header := Header{
 		Version:       Version,
-		Flags:         FlagObfuscated | FlagPadding,
+		Flags:         FlagPadding,
 		MessageType:   MessageTypeAck,
 		SessionID:     sessionID,
 		Sequence:      0x0102030405060708,
@@ -126,7 +125,7 @@ func TestHeaderMarshalBinaryWireLayout(t *testing.T) {
 	want := make([]byte, HeaderSize)
 	copy(want[0:4], []byte{'D', 'G', 'P', '1'})
 	want[4] = Version
-	want[5] = byte(FlagObfuscated | FlagPadding)
+	want[5] = byte(FlagPadding)
 	want[6] = byte(MessageTypeAck)
 	copy(want[8:24], sessionID[:])
 	binary.LittleEndian.PutUint64(want[24:32], 0x0102030405060708)

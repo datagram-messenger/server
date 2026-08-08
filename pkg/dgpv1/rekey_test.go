@@ -167,6 +167,114 @@ func TestSessionRejectsDuplicateRollbackFutureAndBadConfirm(t *testing.T) {
 	}
 }
 
+type receiveStateSnapshot struct {
+	receive         *Codec
+	receiveKey      [KeySize]byte
+	receiveEpoch    uint32
+	replay          ReplayWindow
+	previousReceive *Codec
+	previousReplay  ReplayWindow
+	graceRemaining  uint64
+	graceUntil      time.Time
+}
+
+func snapshotReceiveState(s *Session) receiveStateSnapshot {
+	return receiveStateSnapshot{
+		receive:         s.receive,
+		receiveKey:      s.receiveKey,
+		receiveEpoch:    s.receiveEpoch,
+		replay:          s.replay,
+		previousReceive: s.previousReceive,
+		previousReplay:  s.previousReplay,
+		graceRemaining:  s.graceRemaining,
+		graceUntil:      s.graceUntil,
+	}
+}
+
+func TestSessionRejectedRekeyIsAtomic(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload func(t *testing.T, sender *Session) []byte
+		wantErr error
+	}{
+		{
+			name: "bad confirm",
+			payload: func(t *testing.T, sender *Session) []byte {
+				confirm, err := (&RekeyState{Epoch: sender.sendEpoch}).ComputeKeyConfirm(sender.sendKey[:], sender.sendEpoch+1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				confirm[0] ^= 1
+				payload, err := (RekeyInit{Epoch: sender.sendEpoch + 1, KeyConfirm: confirm}).MarshalBinary()
+				if err != nil {
+					t.Fatal(err)
+				}
+				return payload
+			},
+			wantErr: ErrKeyConfirmFailed,
+		},
+		{
+			name: "bad epoch",
+			payload: func(t *testing.T, sender *Session) []byte {
+				confirm, err := (&RekeyState{Epoch: sender.sendEpoch + 1}).ComputeKeyConfirm(sender.sendKey[:], sender.sendEpoch+2)
+				if err != nil {
+					t.Fatal(err)
+				}
+				payload, err := (RekeyInit{Epoch: sender.sendEpoch + 2, KeyConfirm: confirm}).MarshalBinary()
+				if err != nil {
+					t.Fatal(err)
+				}
+				return payload
+			},
+			wantErr: ErrInvalidEpoch,
+		},
+		{
+			name: "malformed authenticated payload",
+			payload: func(*testing.T, *Session) []byte {
+				return make([]byte, RekeyInitSize-1)
+			},
+			wantErr: ErrMessageLength,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sender, receiver := testSessions(t)
+			const sequence = uint64(7)
+			bad, err := sender.send.Encrypt(MessageTypeRekeyInit, sender.sessionID, sequence, tc.payload(t, sender), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			before := snapshotReceiveState(receiver)
+			if _, err := receiver.Receive(bad); !errors.Is(err, tc.wantErr) {
+				t.Fatalf("rejected rekey error = %v, want %v", err, tc.wantErr)
+			}
+			if after := snapshotReceiveState(receiver); after != before {
+				t.Fatalf("receive state changed after rejected rekey\nbefore: %#v\nafter:  %#v", before, after)
+			}
+
+			confirm, err := (&RekeyState{Epoch: sender.sendEpoch}).ComputeKeyConfirm(sender.sendKey[:], sender.sendEpoch+1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, err := (RekeyInit{Epoch: sender.sendEpoch + 1, KeyConfirm: confirm}).MarshalBinary()
+			if err != nil {
+				t.Fatal(err)
+			}
+			valid, err := sender.send.Encrypt(MessageTypeRekeyInit, sender.sessionID, sequence, payload, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			receiveRekey(t, receiver, valid)
+			if receiver.receiveEpoch != 2 {
+				t.Fatalf("receive epoch = %d, want 2", receiver.receiveEpoch)
+			}
+			if _, err := receiver.Receive(valid); !errors.Is(err, ErrInvalidEpoch) {
+				t.Fatalf("duplicate rekey error = %v, want %v", err, ErrInvalidEpoch)
+			}
+		})
+	}
+}
+
 func TestSessionConcurrentRekeySafe(t *testing.T) {
 	client, server := testSessions(t)
 	client.rekeyFrameLimit = 1

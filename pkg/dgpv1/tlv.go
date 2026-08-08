@@ -18,12 +18,18 @@ const (
 )
 
 var (
-	ErrTLVTooShort      = errors.New("dgpv1: TLV too short")
-	ErrTLVTruncated     = errors.New("dgpv1: truncated TLV")
+	// ErrTLVTooShort indicates that input cannot contain a complete TLV header.
+	ErrTLVTooShort = errors.New("dgpv1: TLV too short")
+	// ErrTLVTruncated indicates that a TLV value or its alignment padding is incomplete.
+	ErrTLVTruncated = errors.New("dgpv1: truncated TLV")
+	// ErrTLVValueTooLarge indicates that a value exceeds the uint16 wire length.
 	ErrTLVValueTooLarge = errors.New("dgpv1: TLV value exceeds uint16 length")
-	ErrTLVDecodeLimit   = errors.New("dgpv1: TLV input exceeds decode limit")
+	// ErrTLVDecodeLimit indicates that input exceeds the caller's positive decode limit.
+	ErrTLVDecodeLimit = errors.New("dgpv1: TLV input exceeds decode limit")
+	// ErrTLVSequenceLimit indicates that an encoded sequence exceeds MaxTLVSequenceSize.
 	ErrTLVSequenceLimit = errors.New("dgpv1: TLV sequence exceeds size limit")
-	ErrTLVElementLimit  = errors.New("dgpv1: TLV sequence exceeds element limit")
+	// ErrTLVElementLimit indicates that a sequence exceeds MaxTLVElements.
+	ErrTLVElementLimit = errors.New("dgpv1: TLV sequence exceeds element limit")
 )
 
 // TLV is one application field. Value is owned by the TLV and does not alias

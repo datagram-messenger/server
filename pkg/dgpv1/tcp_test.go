@@ -28,10 +28,7 @@ func framedBytes(t *testing.T, f Frame) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := make([]byte, 4+len(b))
-	binary.LittleEndian.PutUint32(out, uint32(len(b)))
-	copy(out[4:], b)
-	return out
+	return b
 }
 
 func TestTCPTransportFragmentedAndCoalescedReads(t *testing.T) {
@@ -70,46 +67,44 @@ func (c shortConn) Write(p []byte) (int, error) {
 	return c.Conn.Write(p)
 }
 
-func TestTCPTransportPartialWritesAndRoundTrip(t *testing.T) {
+func TestTCPTransportPartialWritesUseCanonicalWireFormat(t *testing.T) {
 	a, b := net.Pipe()
 	defer a.Close()
 	defer b.Close()
 	writer := NewTCPTransport(shortConn{Conn: a, max: 3})
-	reader := NewTCPTransport(b)
 	want := testTransportFrame(t, 7, bytes.Repeat([]byte{9}, 100))
+	wantWire := framedBytes(t, want)
 	errCh := make(chan error, 1)
 	go func() { errCh <- writer.WriteFrame(context.Background(), want) }()
-	got, err := reader.ReadFrame(context.Background())
-	if err != nil {
+
+	gotWire := make([]byte, len(wantWire))
+	if _, err := io.ReadFull(b, gotWire); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-errCh; err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatal("round trip mismatch")
+	if !bytes.Equal(gotWire, wantWire) {
+		t.Fatal("wire frame mismatch")
+	}
+	if !bytes.Equal(gotWire[:4], Magic[:]) {
+		t.Fatalf("first four bytes = %q, want DGP1 magic", gotWire[:4])
 	}
 }
 
-func TestTCPTransportPrefixErrors(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		n    uint32
-		want error
-	}{
-		{"undersized", minFrameSize - 1, ErrTransportFrameTooShort},
-		{"oversized", MaxFrameSize + 1, ErrTransportFrameTooLarge},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			a, b := net.Pipe()
-			defer a.Close()
-			defer b.Close()
-			go func() { var p [4]byte; binary.LittleEndian.PutUint32(p[:], tc.n); _, _ = b.Write(p[:]) }()
-			_, err := NewTCPTransport(a).ReadFrame(context.Background())
-			if !errors.Is(err, tc.want) {
-				t.Fatalf("error = %v, want %v", err, tc.want)
-			}
-		})
+func TestTCPTransportRejectsOversizedHeaderBeforeBody(t *testing.T) {
+	a, b := net.Pipe()
+	defer a.Close()
+	defer b.Close()
+	wire := make([]byte, HeaderSize)
+	copy(wire[:4], Magic[:])
+	wire[4] = Version
+	wire[6] = byte(MessageTypeEncryptedData)
+	binary.LittleEndian.PutUint32(wire[32:36], MaxFrameSize)
+	go func() { _, _ = b.Write(wire) }()
+	_, err := NewTCPTransport(a).ReadFrame(context.Background())
+	if !errors.Is(err, ErrFrameTooLarge) {
+		t.Fatalf("error = %v, want %v", err, ErrFrameTooLarge)
 	}
 }
 
@@ -129,16 +124,27 @@ func TestTCPTransportEOFAndMalformedFrame(t *testing.T) {
 		defer b.Close()
 		wire := make([]byte, minFrameSize)
 		copy(wire, []byte("BAD!"))
-		go func() {
-			var p [4]byte
-			binary.LittleEndian.PutUint32(p[:], uint32(len(wire)))
-			_, _ = b.Write(append(p[:], wire...))
-		}()
+		go func() { _, _ = b.Write(wire) }()
 		_, err := NewTCPTransport(a).ReadFrame(context.Background())
 		if !errors.Is(err, ErrInvalidMagic) {
 			t.Fatalf("error = %v, want %v", err, ErrInvalidMagic)
 		}
 	})
+}
+
+func TestTCPTransportTruncatedFrame(t *testing.T) {
+	a, b := net.Pipe()
+	want := testTransportFrame(t, 9, []byte("truncated"))
+	wire := framedBytes(t, want)
+	go func() {
+		_, _ = b.Write(wire[:len(wire)-1])
+		_ = b.Close()
+	}()
+	defer a.Close()
+	_, err := NewTCPTransport(a).ReadFrame(context.Background())
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want %v", err, io.ErrUnexpectedEOF)
+	}
 }
 
 func TestTCPTransportConcurrentWritesSerialized(t *testing.T) {
