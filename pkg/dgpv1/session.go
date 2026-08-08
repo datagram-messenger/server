@@ -198,6 +198,8 @@ func outboundMessage(message any) (MessageType, encoding.BinaryMarshaler, error)
 		messageType = MessageTypeSessionClose
 	case Ack, *Ack:
 		messageType = MessageTypeAck
+	case ResumptionTicket, *ResumptionTicket:
+		messageType = MessageTypeResumptionTicket
 	case RekeyInit, *RekeyInit:
 		messageType = MessageTypeRekeyInit
 	case ErrorMessage, *ErrorMessage:
@@ -222,6 +224,8 @@ func newInboundMessage(messageType MessageType) (encoding.BinaryUnmarshaler, err
 		return &SessionClose{}, nil
 	case MessageTypeAck:
 		return &Ack{}, nil
+	case MessageTypeResumptionTicket:
+		return &ResumptionTicket{}, nil
 	case MessageTypeRekeyInit:
 		return &RekeyInit{}, nil
 	case MessageTypeError:

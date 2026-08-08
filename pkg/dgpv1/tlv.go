@@ -11,14 +11,19 @@ const (
 	TLVHeaderSize = 3
 	// MaxTLVValueSize is the largest value representable by the wire length.
 	MaxTLVValueSize = 1<<16 - 1
+	// MaxTLVSequenceSize bounds one TLV sequence to the protocol frame limit.
+	MaxTLVSequenceSize = MaxFrameSize
+	// MaxTLVElements is the most empty, aligned TLVs that fit in one sequence.
+	MaxTLVElements = MaxTLVSequenceSize / 4
 )
 
 var (
-	ErrTLVTooShort       = errors.New("dgpv1: TLV too short")
-	ErrTLVTruncated      = errors.New("dgpv1: truncated TLV")
-	ErrTLVValueTooLarge  = errors.New("dgpv1: TLV value exceeds uint16 length")
-	ErrTLVDecodeLimit    = errors.New("dgpv1: TLV input exceeds decode limit")
-	ErrTLVInvalidPadding = errors.New("dgpv1: TLV padding must be zero")
+	ErrTLVTooShort      = errors.New("dgpv1: TLV too short")
+	ErrTLVTruncated     = errors.New("dgpv1: truncated TLV")
+	ErrTLVValueTooLarge = errors.New("dgpv1: TLV value exceeds uint16 length")
+	ErrTLVDecodeLimit   = errors.New("dgpv1: TLV input exceeds decode limit")
+	ErrTLVSequenceLimit = errors.New("dgpv1: TLV sequence exceeds size limit")
+	ErrTLVElementLimit  = errors.New("dgpv1: TLV sequence exceeds element limit")
 )
 
 // TLV is one application field. Value is owned by the TLV and does not alias
@@ -57,34 +62,41 @@ func (t TLV) MarshalBinary() ([]byte, error) {
 	return buf, nil
 }
 
-// DecodeTLVs decodes exactly one TLV sequence of at most maxBytes bytes. It
-// preserves unknown types and copies values so the result does not alias data.
-// A non-positive maxBytes disables the caller limit.
+// DecodeTLVs decodes exactly one TLV sequence. Protocol-wide size and element
+// limits always apply; a positive maxBytes may impose a tighter caller limit.
+// Unknown types are preserved, padding is ignored, and values are copied.
 func DecodeTLVs(data []byte, maxBytes int) ([]TLV, error) {
+	if len(data) > MaxTLVSequenceSize {
+		return nil, fmt.Errorf("%w: got %d bytes, limit %d", ErrTLVSequenceLimit, len(data), MaxTLVSequenceSize)
+	}
 	if maxBytes > 0 && len(data) > maxBytes {
 		return nil, fmt.Errorf("%w: got %d bytes, limit %d", ErrTLVDecodeLimit, len(data), maxBytes)
 	}
 
-	var out []TLV
+	capacity := len(data) / 4
+	if capacity > MaxTLVElements {
+		capacity = MaxTLVElements
+	}
+	out := make([]TLV, 0, capacity)
 	for offset := 0; offset < len(data); {
+		if len(out) == MaxTLVElements {
+			return nil, fmt.Errorf("%w: limit %d", ErrTLVElementLimit, MaxTLVElements)
+		}
 		remaining := len(data) - offset
 		if remaining < TLVHeaderSize {
 			return nil, fmt.Errorf("%w at offset %d: got %d header bytes", ErrTLVTooShort, offset, remaining)
 		}
-		valueLen := int(binary.LittleEndian.Uint16(data[offset+1 : offset+3]))
-		unpadded := TLVHeaderSize + valueLen
-		encoded := align4(unpadded)
-		if remaining < unpadded {
+
+		valueLen := int(binary.LittleEndian.Uint16(data[offset+1 : offset+TLVHeaderSize]))
+		if valueLen > remaining-TLVHeaderSize {
 			return nil, fmt.Errorf("%w at offset %d: value needs %d bytes, got %d", ErrTLVTruncated, offset, valueLen, remaining-TLVHeaderSize)
 		}
-		if remaining < encoded {
-			return nil, fmt.Errorf("%w at offset %d: padding needs %d bytes, got %d", ErrTLVTruncated, offset, encoded-unpadded, remaining-unpadded)
+		unpadded := TLVHeaderSize + valueLen
+		paddingLen := (4 - unpadded%4) % 4
+		if paddingLen > remaining-unpadded {
+			return nil, fmt.Errorf("%w at offset %d: padding needs %d bytes, got %d", ErrTLVTruncated, offset, paddingLen, remaining-unpadded)
 		}
-		for _, b := range data[offset+unpadded : offset+encoded] {
-			if b != 0 {
-				return nil, fmt.Errorf("%w at offset %d", ErrTLVInvalidPadding, offset)
-			}
-		}
+		encoded := unpadded + paddingLen
 		out = append(out, TLV{
 			Type:  data[offset],
 			Value: append([]byte(nil), data[offset+TLVHeaderSize:offset+unpadded]...),
@@ -96,14 +108,18 @@ func DecodeTLVs(data []byte, maxBytes int) ([]TLV, error) {
 
 // EncodeTLVs encodes fields in order. Duplicate and unknown types are retained.
 func EncodeTLVs(fields []TLV) ([]byte, error) {
+	if len(fields) > MaxTLVElements {
+		return nil, fmt.Errorf("%w: got %d, limit %d", ErrTLVElementLimit, len(fields), MaxTLVElements)
+	}
+
 	total := 0
 	for _, field := range fields {
 		n, err := field.EncodedLen()
 		if err != nil {
 			return nil, err
 		}
-		if total > int(^uint(0)>>1)-n {
-			return nil, ErrTLVValueTooLarge
+		if n > MaxTLVSequenceSize-total {
+			return nil, fmt.Errorf("%w: limit %d", ErrTLVSequenceLimit, MaxTLVSequenceSize)
 		}
 		total += n
 	}

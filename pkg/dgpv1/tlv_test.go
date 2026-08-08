@@ -97,25 +97,41 @@ func TestTLVTruncationAtEveryBoundary(t *testing.T) {
 	}
 }
 
-func TestTLVRejectsNonzeroPadding(t *testing.T) {
-	wire := []byte{1, 0, 0, 1}
-	_, err := DecodeTLVs(wire, len(wire))
-	if !errors.Is(err, ErrTLVInvalidPadding) {
-		t.Fatalf("error = %v, want ErrTLVInvalidPadding", err)
+func TestTLVIgnoresOpaquePadding(t *testing.T) {
+	wire := []byte{1, 0, 0, 0xa5}
+	got, err := DecodeTLVs(wire, len(wire))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []TLV{{Type: 1, Value: nil}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DecodeTLVs() = %#v, want %#v", got, want)
 	}
 }
 
 func TestTLVLimitsAndMaximumValue(t *testing.T) {
-	max := TLV{Type: 1, Value: make([]byte, MaxTLVValueSize)}
+	maxWireValueSize := MaxTLVSequenceSize - TLVHeaderSize
+	for align4(TLVHeaderSize+maxWireValueSize) > MaxTLVSequenceSize {
+		maxWireValueSize--
+	}
+	max := TLV{Type: 1, Value: make([]byte, maxWireValueSize)}
 	wire, err := max.MarshalBinary()
 	if err != nil {
-		t.Fatalf("maximum value: %v", err)
+		t.Fatalf("maximum sequence value: %v", err)
 	}
 	if _, err := DecodeTLVs(wire, len(wire)); err != nil {
-		t.Fatalf("decode maximum value: %v", err)
+		t.Fatalf("decode maximum sequence value: %v", err)
 	}
 	if _, err := DecodeTLVs(wire, len(wire)-1); !errors.Is(err, ErrTLVDecodeLimit) {
 		t.Fatalf("limit error = %v, want ErrTLVDecodeLimit", err)
+	}
+	maxLengthField := TLV{Type: 1, Value: make([]byte, MaxTLVValueSize)}
+	maxLengthWire, err := maxLengthField.MarshalBinary()
+	if err != nil {
+		t.Fatalf("maximum uint16 value: %v", err)
+	}
+	if _, err := DecodeTLVs(maxLengthWire, 0); !errors.Is(err, ErrTLVSequenceLimit) {
+		t.Fatalf("maximum uint16 sequence error = %v, want ErrTLVSequenceLimit", err)
 	}
 	tooLarge := TLV{Type: 1, Value: make([]byte, MaxTLVValueSize+1)}
 	if _, err := tooLarge.MarshalBinary(); !errors.Is(err, ErrTLVValueTooLarge) {
@@ -123,6 +139,69 @@ func TestTLVLimitsAndMaximumValue(t *testing.T) {
 	}
 	if _, err := NewTLV(1, tooLarge.Value); !errors.Is(err, ErrTLVValueTooLarge) {
 		t.Fatalf("NewTLV oversize error = %v, want ErrTLVValueTooLarge", err)
+	}
+}
+
+func TestTLVSequenceAndElementLimits(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func() error
+		want error
+	}{
+		{
+			name: "decode protocol size limit",
+			run: func() error {
+				_, err := DecodeTLVs(make([]byte, MaxTLVSequenceSize+1), 0)
+				return err
+			},
+			want: ErrTLVSequenceLimit,
+		},
+		{
+			name: "encode protocol size limit",
+			run: func() error {
+				_, err := EncodeTLVs([]TLV{
+					{Type: 1, Value: make([]byte, MaxTLVValueSize)},
+					{Type: 2},
+				})
+				return err
+			},
+			want: ErrTLVSequenceLimit,
+		},
+		{
+			name: "encode element limit",
+			run: func() error {
+				_, err := EncodeTLVs(make([]TLV, MaxTLVElements+1))
+				return err
+			},
+			want: ErrTLVElementLimit,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.run(); !errors.Is(err, tt.want) {
+				t.Fatalf("error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestTLVMalformedDeclaredLength(t *testing.T) {
+	tests := []struct {
+		name string
+		wire []byte
+		want error
+	}{
+		{name: "missing header", wire: []byte{1, 2}, want: ErrTLVTooShort},
+		{name: "declared maximum without value", wire: []byte{1, 0xff, 0xff}, want: ErrTLVTruncated},
+		{name: "missing alignment padding", wire: []byte{1, 2, 0, 0xaa, 0xbb}, want: ErrTLVTruncated},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := DecodeTLVs(tt.wire, 0)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("error = %v, want %v", err, tt.want)
+			}
+		})
 	}
 }
 

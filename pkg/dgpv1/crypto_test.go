@@ -22,11 +22,6 @@ func TestCodecRoundTrip(t *testing.T) {
 			if len(frame.Payload) != len(plaintext) || len(frame.Padding) != 17 {
 				t.Fatalf("body lengths = %d, %d", len(frame.Payload), len(frame.Padding))
 			}
-			for _, b := range frame.Padding {
-				if b == 0 {
-					t.Fatal("generated zero padding byte")
-				}
-			}
 			got, err := codec.Decrypt(frame)
 			if err != nil {
 				t.Fatal(err)
@@ -131,14 +126,14 @@ func TestCodecWrongKeyAndCipherFailAuthentication(t *testing.T) {
 	}
 }
 
-func TestCodecRejectsZeroPadding(t *testing.T) {
+func TestCodecAcceptsZeroPaddingByte(t *testing.T) {
 	codec, _ := NewCodec(CipherChaCha20Poly1305, make([]byte, KeySize))
 	frame, err := codec.Encrypt(MessageTypeEncryptedData, [16]byte{1}, 1, nil, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	frame.Padding[0] = 0
-	if _, err := codec.Decrypt(frame); !errors.Is(err, ErrInvalidPadding) {
+	if _, err := codec.Decrypt(frame); err != nil {
 		t.Fatalf("Decrypt() error = %v", err)
 	}
 }
@@ -155,16 +150,15 @@ func TestCodecAADUsesCanonicalHeader(t *testing.T) {
 	}
 }
 
-func TestRandomNonzeroBytes(t *testing.T) {
-	reader := bytes.NewReader([]byte{0, 1, 0, 2, 3})
-	got, err := randomNonzeroBytes(reader, 3)
-	if err != nil {
-		t.Fatal(err)
+func TestRandomBytes(t *testing.T) {
+	got, err := randomBytes(bytes.NewReader([]byte{0, 1, 2}), 3)
+	if err != nil || !bytes.Equal(got, []byte{0, 1, 2}) {
+		t.Fatalf("padding = %v, error = %v", got, err)
 	}
-	if !bytes.Equal(got, []byte{1, 2, 3}) {
-		t.Fatalf("padding = %v", got)
-	}
-	if _, err := randomNonzeroBytes(bytes.NewReader(nil), 1); err == nil {
+	if _, err := randomBytes(bytes.NewReader(nil), 1); err == nil {
 		t.Fatal("expected entropy error")
+	}
+	if _, err := randomBytes(bytes.NewReader(nil), 256); !errors.Is(err, ErrPaddingLength) {
+		t.Fatalf("length error = %v", err)
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const minFrameSize = HeaderSize + AEADTagSize
+const minFrameSize = HeaderSize
 
 // TCPTransport carries length-prefixed DGPv1 frames over a stream connection.
 type TCPTransport struct {

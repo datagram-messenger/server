@@ -45,15 +45,15 @@ const (
 type MessageType uint8
 
 const (
-	MessageTypeHandshakeInit MessageType = 0x01 + iota
-	MessageTypeHandshakeResponse
-	MessageTypeEncryptedData
-	MessageTypePingPong
-	MessageTypeSessionClose
-	MessageTypeAck
-	MessageTypeResumptionTicket
-	MessageTypeRekeyInit
-	MessageTypeError
+	MessageTypeHandshakeInit     MessageType = 0x01
+	MessageTypeHandshakeResponse MessageType = 0x02
+	MessageTypeEncryptedData     MessageType = 0x03
+	MessageTypePingPong          MessageType = 0x04
+	MessageTypeSessionClose      MessageType = 0x05
+	MessageTypeAck               MessageType = 0x06
+	MessageTypeResumptionTicket  MessageType = 0x07
+	MessageTypeRekeyInit         MessageType = 0x08
+	MessageTypeError             MessageType = 0x09
 )
 
 // Header is the 40-byte fixed DGPv1 frame header. Reserved wire fields are
@@ -86,18 +86,23 @@ func NewHeader(messageType MessageType, sessionID [16]byte, sequence uint64, pay
 	}
 }
 
-// FrameSize returns the complete frame size, excluding any transport prefix.
-func (h Header) FrameSize() uint64 {
-	return HeaderSize + uint64(h.PayloadLength) + AEADTagSize + uint64(h.PadLength)
+func (h Header) hasAEADTag() bool {
+	return h.MessageType != MessageTypeHandshakeInit && h.MessageType != MessageTypeHandshakeResponse
 }
 
-// Validate checks fields that senders must encode canonically.
-func (h Header) Validate() error {
+// FrameSize returns the complete frame size, excluding any transport prefix.
+// Handshake frames carry Noise messages directly and have no outer AEAD tag.
+func (h Header) FrameSize() uint64 {
+	size := uint64(HeaderSize) + uint64(h.PayloadLength) + uint64(h.PadLength)
+	if h.hasAEADTag() {
+		size += AEADTagSize
+	}
+	return size
+}
+
+func (h Header) validateCommon() error {
 	if h.Version != Version {
 		return fmt.Errorf("%w: got %d, want %d", ErrUnsupportedVersion, h.Version, Version)
-	}
-	if h.Flags&^knownFlags != 0 {
-		return fmt.Errorf("%w: 0x%02x", ErrReservedFlags, uint8(h.Flags&^knownFlags))
 	}
 	if (h.Flags&FlagPadding != 0) != (h.PadLength != 0) {
 		return ErrPaddingFlag
@@ -108,9 +113,29 @@ func (h Header) Validate() error {
 	return nil
 }
 
-// MarshalBinary encodes h in the DGPv1 little-endian wire format.
-func (h Header) MarshalBinary() ([]byte, error) {
-	if err := h.Validate(); err != nil {
+// Validate checks fields that senders must encode canonically.
+func (h Header) Validate() error {
+	if err := h.validateCommon(); err != nil {
+		return err
+	}
+	if h.Flags&^knownFlags != 0 {
+		return fmt.Errorf("%w: 0x%02x", ErrReservedFlags, uint8(h.Flags&^knownFlags))
+	}
+	return nil
+}
+
+// ValidateReceive checks invariants required when accepting a peer header.
+// Unknown flag bits are retained and ignored for forward compatibility.
+func (h Header) ValidateReceive() error { return h.validateCommon() }
+
+func (h Header) marshalBinary(validateSend bool) ([]byte, error) {
+	var err error
+	if validateSend {
+		err = h.Validate()
+	} else {
+		err = h.ValidateReceive()
+	}
+	if err != nil {
 		return nil, err
 	}
 
@@ -125,6 +150,9 @@ func (h Header) MarshalBinary() ([]byte, error) {
 	buf[36] = h.PadLength
 	return buf, nil
 }
+
+// MarshalBinary encodes h in the DGPv1 little-endian wire format.
+func (h Header) MarshalBinary() ([]byte, error) { return h.marshalBinary(true) }
 
 // UnmarshalBinary decodes a plaintext DGPv1 fixed header. Reserved bytes and
 // unknown reserved flag bits are accepted as required for forward compatibility.
@@ -150,8 +178,8 @@ func (h *Header) UnmarshalBinary(data []byte) error {
 		PayloadLength: binary.LittleEndian.Uint32(data[32:36]),
 		PadLength:     data[36],
 	}
-	if decoded.FrameSize() > MaxFrameSize {
-		return fmt.Errorf("%w: %d bytes", ErrFrameTooLarge, decoded.FrameSize())
+	if err := decoded.ValidateReceive(); err != nil {
+		return err
 	}
 
 	*h = decoded

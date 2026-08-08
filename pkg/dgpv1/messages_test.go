@@ -241,3 +241,43 @@ func TestTruncationAtEveryBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestHandshakePayloadSizeLimits(t *testing.T) {
+	oversizedInit := HandshakeInit{
+		Pattern:      NoisePatternIK,
+		NoisePayload: make([]byte, MaxHandshakePayloadSize-HandshakeInitFixedSize+1),
+	}
+	if _, err := oversizedInit.MarshalBinary(); !errors.Is(err, ErrMessageLength) {
+		t.Fatalf("oversized init marshal: %v", err)
+	}
+	initWire := make([]byte, MaxHandshakePayloadSize+1)
+	initWire[0] = byte(NoisePatternIK)
+	var init HandshakeInit
+	if err := init.UnmarshalBinary(initWire); !errors.Is(err, ErrMessageLength) {
+		t.Fatalf("oversized init unmarshal: %v", err)
+	}
+
+	oversizedResponse := HandshakeResponse{
+		NoisePayload: make([]byte, MaxHandshakePayloadSize-HandshakeResponseFixedSize+1),
+	}
+	if _, err := oversizedResponse.MarshalBinary(); !errors.Is(err, ErrMessageLength) {
+		t.Fatalf("oversized response marshal: %v", err)
+	}
+	var response HandshakeResponse
+	if err := response.UnmarshalBinary(make([]byte, MaxHandshakePayloadSize+1)); !errors.Is(err, ErrMessageLength) {
+		t.Fatalf("oversized response unmarshal: %v", err)
+	}
+}
+
+func TestTextMessageDuplicateTLVDetectedRegardlessOfOrder(t *testing.T) {
+	wire := []byte{
+		0, 0,
+		2, 0, 0, 0,
+		1, 0, 0, 0,
+		1, 0, 0, 0,
+	}
+	var message ErrorMessage
+	if err := message.UnmarshalBinary(wire); !errors.Is(err, ErrDuplicateMessageTLV) {
+		t.Fatalf("duplicate TLV: %v", err)
+	}
+}

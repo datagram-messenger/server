@@ -137,7 +137,8 @@ func TestFrameUnmarshalBinaryErrors(t *testing.T) {
 		wantErr error
 	}{
 		{name: "empty", data: func() []byte { return nil }, wantErr: ErrFrameTooShort},
-		{name: "missing tag byte", data: func() []byte { return make([]byte, HeaderSize+AEADTagSize-1) }, wantErr: ErrFrameTooShort},
+		{name: "header too short", data: func() []byte { return make([]byte, HeaderSize-1) }, wantErr: ErrFrameTooShort},
+		{name: "missing encrypted tag byte", data: func() []byte { return append([]byte(nil), valid[:len(valid)-AEADTagSize-1]...) }, wantErr: ErrFrameLengthMismatch},
 		{name: "invalid header", data: func() []byte { b := append([]byte(nil), valid...); b[0] = 0; return b }, wantErr: ErrInvalidMagic},
 		{name: "truncated payload", data: func() []byte { return append([]byte(nil), valid[:len(valid)-1]...) }, wantErr: ErrFrameLengthMismatch},
 		{name: "trailing byte", data: func() []byte { return append(append([]byte(nil), valid...), 0) }, wantErr: ErrFrameLengthMismatch},

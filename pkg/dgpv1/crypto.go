@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 
 	"golang.org/x/crypto/chacha20poly1305"
 )
@@ -22,7 +21,6 @@ var (
 	ErrInvalidSequence   = errors.New("dgpv1: encrypted frame sequence must be nonzero")
 	ErrInvalidSessionID  = errors.New("dgpv1: encrypted frame session ID must be nonzero")
 	ErrAuthentication    = errors.New("dgpv1: authentication failed")
-	ErrInvalidPadding    = errors.New("dgpv1: padding contains a zero byte")
 )
 
 // CipherSuite identifies a DGPv1 data-frame AEAD.
@@ -83,7 +81,7 @@ func (c *Codec) Encrypt(messageType MessageType, sessionID [16]byte, sequence ui
 		return Frame{}, err
 	}
 	sealed := c.aead.Seal(nil, nonce(sequence), plaintext, aad)
-	padding, err := randomNonzeroBytes(rand.Reader, int(padLength))
+	padding, err := randomBytes(rand.Reader, int(padLength))
 	if err != nil {
 		return Frame{}, fmt.Errorf("dgpv1: generate padding: %w", err)
 	}
@@ -93,16 +91,13 @@ func (c *Codec) Encrypt(messageType MessageType, sessionID [16]byte, sequence ui
 // Decrypt authenticates and decrypts an encrypted frame. All authentication
 // failures return the same error and reveal no underlying AEAD detail.
 func (c *Codec) Decrypt(frame Frame) ([]byte, error) {
-	if err := frame.Validate(); err != nil {
+	if err := frame.ValidateReceive(); err != nil {
 		return nil, err
 	}
 	if err := validateEncryptedHeader(frame.Header.MessageType, frame.Header.SessionID, frame.Header.Sequence); err != nil {
 		return nil, err
 	}
-	if slices.Contains(frame.Padding, 0) {
-		return nil, ErrInvalidPadding
-	}
-	aad, err := frame.Header.MarshalBinary()
+	aad, err := frame.Header.marshalBinary(false)
 	if err != nil {
 		return nil, err
 	}
@@ -135,14 +130,13 @@ func validateEncryptedHeader(messageType MessageType, sessionID [16]byte, sequen
 	return nil
 }
 
-func randomNonzeroBytes(reader io.Reader, length int) ([]byte, error) {
+func randomBytes(reader io.Reader, length int) ([]byte, error) {
+	if length < 0 || length > 255 {
+		return nil, ErrPaddingLength
+	}
 	padding := make([]byte, length)
-	for i := range padding {
-		for padding[i] == 0 {
-			if _, err := io.ReadFull(reader, padding[i:i+1]); err != nil {
-				return nil, err
-			}
-		}
+	if _, err := io.ReadFull(reader, padding); err != nil {
+		return nil, err
 	}
 	return padding, nil
 }
