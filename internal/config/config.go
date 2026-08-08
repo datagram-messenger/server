@@ -30,8 +30,16 @@ type Config struct {
 	IdleTimeout time.Duration
 	// KeepaliveInterval controls how often the connection runtime sends keepalive messages.
 	KeepaliveInterval time.Duration
+	// KeepaliveTimeout limits how long an outstanding keepalive may remain unacknowledged.
+	KeepaliveTimeout time.Duration
 	// OutboundQueue is the capacity of the connection runtime's outbound queue.
 	OutboundQueue int
+	// HandlerQueue is the capacity of pending per-connection handler work.
+	HandlerQueue int
+	// MaxConcurrentHandshakes limits connections concurrently performing a handshake.
+	MaxConcurrentHandshakes int
+	// MaxActiveConnections limits authenticated connections retained by the server.
+	MaxActiveConnections int
 }
 
 // Load reads configuration from environment variables. DGP_STATIC_KEY is
@@ -39,13 +47,17 @@ type Config struct {
 // queue values are rejected.
 func Load() (Config, error) {
 	cfg := Config{
-		Address:           envOr("DGP_ADDRESS", ":8090"),
-		HandshakeTimeout:  10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		IdleTimeout:       2 * time.Minute,
-		KeepaliveInterval: 30 * time.Second,
-		OutboundQueue:     64,
+		Address:                 envOr("DGP_ADDRESS", ":8090"),
+		HandshakeTimeout:        10 * time.Second,
+		ReadTimeout:             30 * time.Second,
+		WriteTimeout:            10 * time.Second,
+		IdleTimeout:             2 * time.Minute,
+		KeepaliveInterval:       30 * time.Second,
+		KeepaliveTimeout:        60 * time.Second,
+		OutboundQueue:           64,
+		HandlerQueue:            64,
+		MaxConcurrentHandshakes: 64,
+		MaxActiveConnections:    1024,
 	}
 
 	keyText := os.Getenv("DGP_STATIC_KEY")
@@ -73,11 +85,20 @@ func Load() (Config, error) {
 	if cfg.KeepaliveInterval, err = durationEnv("DGP_KEEPALIVE_INTERVAL", cfg.KeepaliveInterval); err != nil {
 		return Config{}, err
 	}
-	if value := os.Getenv("DGP_OUTBOUND_QUEUE"); value != "" {
-		cfg.OutboundQueue, err = strconv.Atoi(value)
-		if err != nil || cfg.OutboundQueue <= 0 {
-			return Config{}, errors.New("config: DGP_OUTBOUND_QUEUE must be a positive integer")
-		}
+	if cfg.KeepaliveTimeout, err = durationEnv("DGP_KEEPALIVE_TIMEOUT", cfg.KeepaliveTimeout); err != nil {
+		return Config{}, err
+	}
+	if cfg.OutboundQueue, err = positiveIntEnv("DGP_OUTBOUND_QUEUE", cfg.OutboundQueue); err != nil {
+		return Config{}, err
+	}
+	if cfg.HandlerQueue, err = positiveIntEnv("DGP_HANDLER_QUEUE", cfg.HandlerQueue); err != nil {
+		return Config{}, err
+	}
+	if cfg.MaxConcurrentHandshakes, err = positiveIntEnv("DGP_MAX_CONCURRENT_HANDSHAKES", cfg.MaxConcurrentHandshakes); err != nil {
+		return Config{}, err
+	}
+	if cfg.MaxActiveConnections, err = positiveIntEnv("DGP_MAX_ACTIVE_CONNECTIONS", cfg.MaxActiveConnections); err != nil {
+		return Config{}, err
 	}
 	return cfg, nil
 }
@@ -87,6 +108,18 @@ func envOr(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func positiveIntEnv(key string, fallback int) (int, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("config: %s must be a positive integer", key)
+	}
+	return parsed, nil
 }
 
 func durationEnv(key string, fallback time.Duration) (time.Duration, error) {

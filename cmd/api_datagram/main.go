@@ -72,14 +72,18 @@ func run() error {
 		return err
 	}
 	server, err := dgpv1.NewServer(dgpv1.ServerConfig{
-		StaticKey:         staticKey,
-		CipherSuite:       dgpv1.CipherChaCha20Poly1305,
-		HandshakeTimeout:  cfg.HandshakeTimeout,
-		ReadTimeout:       cfg.ReadTimeout,
-		WriteTimeout:      cfg.WriteTimeout,
-		IdleTimeout:       cfg.IdleTimeout,
-		KeepaliveInterval: cfg.KeepaliveInterval,
-		OutboundQueue:     cfg.OutboundQueue,
+		StaticKey:               staticKey,
+		CipherSuite:             dgpv1.CipherChaCha20Poly1305,
+		HandshakeTimeout:        cfg.HandshakeTimeout,
+		ReadTimeout:             cfg.ReadTimeout,
+		WriteTimeout:            cfg.WriteTimeout,
+		IdleTimeout:             cfg.IdleTimeout,
+		KeepaliveInterval:       cfg.KeepaliveInterval,
+		KeepaliveTimeout:        cfg.KeepaliveTimeout,
+		OutboundQueue:           cfg.OutboundQueue,
+		HandlerQueue:            cfg.HandlerQueue,
+		MaxConcurrentHandshakes: cfg.MaxConcurrentHandshakes,
+		MaxActiveConnections:    cfg.MaxActiveConnections,
 		Handler: func(_ context.Context, conn *dgpv1.Connection, message any) error {
 			response, ok := responseFor(message)
 			if !ok {

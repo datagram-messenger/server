@@ -51,7 +51,11 @@ export DGP_STATIC_KEY='<64-hex-character-secret>'
 | `DGP_WRITE_TIMEOUT` | No | `10s` | Positive Go duration; per-frame write deadline and graceful-close allowance. |
 | `DGP_IDLE_TIMEOUT` | No | `2m` | Positive Go duration; closes a connection after no authenticated inbound frames. |
 | `DGP_KEEPALIVE_INTERVAL` | No | `30s` | Positive Go duration; interval for encrypted Ping frames. |
+| `DGP_KEEPALIVE_TIMEOUT` | No | `60s` | Positive Go duration; maximum wait for the matching Pong. |
 | `DGP_OUTBOUND_QUEUE` | No | `64` | Positive base-10 integer. |
+| `DGP_HANDLER_QUEUE` | No | `64` | Positive base-10 integer; pending per-connection handler work. |
+| `DGP_MAX_CONCURRENT_HANDSHAKES` | No | `64` | Positive base-10 integer; concurrent handshakes admitted. |
+| `DGP_MAX_ACTIVE_CONNECTIONS` | No | `1024` | Positive base-10 integer; authenticated connections retained. |
 
 Go duration examples include `500ms`, `15s`, and `2m`. Invalid configuration prevents startup and returns an error.
 
