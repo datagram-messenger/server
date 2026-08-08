@@ -1,0 +1,38 @@
+{
+  "schema": "dgpv1-wire-v1",
+  "vectors": [
+    {
+      "name": "tlv-core-value",
+      "kind": "tlv",
+      "wire_hex": "2a03001020300000",
+      "valid": true
+    },
+    {
+      "name": "tlv-empty-opaque-padding",
+      "kind": "tlv",
+      "wire_hex": "01000000",
+      "valid": true
+    },
+    {
+      "name": "tlv-short-header",
+      "kind": "tlv",
+      "wire_hex": "0102",
+      "valid": false,
+      "error": "ErrTLVTooShort"
+    },
+    {
+      "name": "tlv-truncated-value",
+      "kind": "tlv",
+      "wire_hex": "0105000102",
+      "valid": false,
+      "error": "ErrTLVTruncated"
+    },
+    {
+      "name": "tlv-missing-alignment",
+      "kind": "tlv",
+      "wire_hex": "010200aabb",
+      "valid": false,
+      "error": "ErrTLVTruncated"
+    }
+  ]
+}

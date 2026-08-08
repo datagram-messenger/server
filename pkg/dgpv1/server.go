@@ -45,6 +45,9 @@ type ServerConfig struct {
 	// IdleTimeout controls the maximum time a connection may remain idle.
 	IdleTimeout time.Duration
 
+	// KeepaliveInterval controls how often an encrypted Ping is sent.
+	KeepaliveInterval time.Duration
+
 	// OutboundQueue sets the channel capacity for buffered outbound messages.
 	OutboundQueue int
 
@@ -145,12 +148,13 @@ func (s *Server) handleConn(netConn net.Conn) {
 	}
 
 	connConfig := ConnectionConfig{
-		OutboundQueue:    s.config.OutboundQueue,
-		HandshakeTimeout: s.config.HandshakeTimeout,
-		ReadTimeout:      s.config.ReadTimeout,
-		WriteTimeout:     s.config.WriteTimeout,
-		IdleTimeout:      s.config.IdleTimeout,
-		Handler:          s.config.Handler,
+		OutboundQueue:     s.config.OutboundQueue,
+		HandshakeTimeout:  s.config.HandshakeTimeout,
+		ReadTimeout:       s.config.ReadTimeout,
+		WriteTimeout:      s.config.WriteTimeout,
+		IdleTimeout:       s.config.IdleTimeout,
+		KeepaliveInterval: s.config.KeepaliveInterval,
+		Handler:           s.config.Handler,
 	}
 
 	conn := NewConnection(transport, session, connConfig)

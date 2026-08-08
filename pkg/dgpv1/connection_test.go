@@ -17,8 +17,8 @@ func testConnectionPair(t *testing.T, config ConnectionConfig) (*Connection, *Se
 	connection := NewConnection(NewTCPTransport(localConn), localSession, config)
 	peerTransport := NewTCPTransport(peerConn)
 	cleanup := func() {
-		_ = connection.Close()
 		_ = peerTransport.Close()
+		_ = connection.Close()
 		select {
 		case <-connection.Done():
 		case <-time.After(connectionTestTimeout):
@@ -103,6 +103,38 @@ func TestConnectionPingPong(t *testing.T) {
 	}
 }
 
+func TestConnectionRekeyContinues(t *testing.T) {
+	received := make(chan any, 2)
+	connection, peerSession, peerTransport, cleanup := testConnectionPair(t, ConnectionConfig{
+		Handler: func(_ context.Context, _ *Connection, message any) error {
+			received <- message
+			return nil
+		},
+	})
+	defer cleanup()
+	connection.Start(context.Background())
+
+	peerSession.sendMu.Lock()
+	peerSession.rekeyFrameLimit = 1
+	peerSession.sendMu.Unlock()
+	writeConnectionMessage(t, peerTransport, peerSession, PingPong{IsResponse: true, Nonce: 1})
+	writeConnectionMessage(t, peerTransport, peerSession, PingPong{IsResponse: true, Nonce: 2})
+	writeConnectionMessage(t, peerTransport, peerSession, PingPong{IsResponse: true, Nonce: 3})
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-received:
+		case <-time.After(connectionTestTimeout):
+			t.Fatal("connection stopped dispatching after rekey")
+		}
+	}
+	select {
+	case <-connection.Done():
+		t.Fatalf("connection stopped after valid rekey: %v", connection.Err())
+	default:
+	}
+}
+
 func TestConnectionRemoteSessionClose(t *testing.T) {
 	connection, peerSession, peerTransport, cleanup := testConnectionPair(t, ConnectionConfig{})
 	defer cleanup()
@@ -180,12 +212,73 @@ func TestConnectionHandlerFailureContainment(t *testing.T) {
 	}
 }
 
-func TestConnectionCloseIdempotent(t *testing.T) {
-	connection, _, _, cleanup := testConnectionPair(t, ConnectionConfig{})
+func TestConnectionIdleTimeoutSendsSessionClose(t *testing.T) {
+	connection, peerSession, peerTransport, cleanup := testConnectionPair(t, ConnectionConfig{
+		IdleTimeout:  20 * time.Millisecond,
+		WriteTimeout: connectionTestTimeout,
+	})
 	defer cleanup()
 	connection.Start(context.Background())
 
-	if err := connection.Close(); err != nil {
+	got, ok := readConnectionMessage(t, peerTransport, peerSession).(*SessionClose)
+	if !ok || got.Code != 3 {
+		t.Fatalf("close = %#v", got)
+	}
+	waitConnection(t, connection)
+	if !errors.Is(connection.Err(), ErrIdleTimeout) {
+		t.Fatalf("error = %v", connection.Err())
+	}
+}
+
+func TestConnectionPeriodicKeepaliveAndPong(t *testing.T) {
+	connection, peerSession, peerTransport, cleanup := testConnectionPair(t, ConnectionConfig{
+		KeepaliveInterval: 20 * time.Millisecond,
+	})
+	defer cleanup()
+	connection.Start(context.Background())
+
+	ping, ok := readConnectionMessage(t, peerTransport, peerSession).(*PingPong)
+	if !ok || ping.IsResponse || ping.Nonce == 0 {
+		t.Fatalf("ping = %#v", ping)
+	}
+	writeConnectionMessage(t, peerTransport, peerSession, PingPong{IsResponse: true, Nonce: ping.Nonce})
+	select {
+	case <-connection.Done():
+		t.Fatalf("connection stopped after valid pong: %v", connection.Err())
+	default:
+	}
+}
+
+func TestConnectionLocalCloseSendsSessionClose(t *testing.T) {
+	connection, peerSession, peerTransport, cleanup := testConnectionPair(t, ConnectionConfig{
+		WriteTimeout: connectionTestTimeout,
+	})
+	defer cleanup()
+	connection.Start(context.Background())
+
+	closed := make(chan error, 1)
+	go func() { closed <- connection.Close() }()
+	got, ok := readConnectionMessage(t, peerTransport, peerSession).(*SessionClose)
+	if !ok || got.Code != 0 {
+		t.Fatalf("close = %#v", got)
+	}
+	if err := <-closed; err != nil {
+		t.Fatal(err)
+	}
+	waitConnection(t, connection)
+}
+
+func TestConnectionCloseIdempotent(t *testing.T) {
+	connection, peerSession, peerTransport, cleanup := testConnectionPair(t, ConnectionConfig{WriteTimeout: connectionTestTimeout})
+	defer cleanup()
+	connection.Start(context.Background())
+
+	closed := make(chan error, 1)
+	go func() { closed <- connection.Close() }()
+	if _, ok := readConnectionMessage(t, peerTransport, peerSession).(*SessionClose); !ok {
+		t.Fatal("expected SessionClose")
+	}
+	if err := <-closed; err != nil {
 		t.Fatal(err)
 	}
 	if err := connection.Close(); err != nil {

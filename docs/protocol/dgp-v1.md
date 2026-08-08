@@ -3,6 +3,9 @@
 **Status:** Draft — Implementation Track
 **Version:** 1.0.0
 **Category:** Application-Layer Secure Transport Protocol
+**Normative profile:** Current MVP
+
+> **Scope.** Unless a section is explicitly labeled **Historical / Post-MVP**, normative terms such as MUST, SHOULD, and MAY describe the current MVP. The MVP uses TCP, a three-flight Noise XX handshake, and ChaCha20-Poly1305. QUIC, transport obfuscation, Noise IK, resumption tickets, and 0-RTT are not implemented, negotiated, required, or permitted by the MVP. They are retained only in §8 as protocol history.
 
 ---
 
@@ -15,17 +18,10 @@ protocol designed for low-latency, bidirectional, multiplexed communication
 between native desktop clients (Rust, embedded in Tauri v2) and
 high-concurrency Go microservice backends.
 
-DGPv1 draws its layered structure and framing philosophy from Telegram's
-MTProto (strict separation of transport / cryptographic / application
-layers, custom TLV-oriented framing, transport obfuscation), while
-replacing MTProto's historical, custom-built cryptographic core with a
-handshake constructed from the **Noise Protocol Framework**, modern AEAD
-ciphers, and HKDF-based key schedules — primitives with established formal
-security proofs, rather than bespoke constructions.
-
-DGPv1 is transport-agnostic at the application layer: the same encrypted
-frame format is carried either directly over TCP or over QUIC datagrams,
-allowing automatic fallback when one transport is degraded or blocked.
+DGPv1 separates transport, framing, cryptographic, session, and application
+layers. The current MVP carries its fixed binary frames over TCP and uses the
+Noise Protocol Framework, modern AEAD, and HKDF-based key schedules rather
+than bespoke cryptographic constructions.
 
 ### 1.2 Layered Architecture (ASCII Diagram)
 
@@ -38,20 +34,19 @@ allowing automatic fallback when one transport is degraded or blocked.
 |     (Session state machine, sequence numbers, multiplexing)  |
 +--------------------------------------------------------------+
 | L2  DGP Cryptographic Layer                                  |
-|     (Noise_XX / Noise_IK handshake, AEAD encrypt/decrypt,    |
+|     (Noise XX handshake, AEAD encrypt/decrypt,               |
 |      HKDF-SHA256 key schedule, replay window)                |
 +--------------------------------------------------------------+
 | L1  DGP Framing Layer                                        |
-|     (TLV binary envelope, fixed header, padding/obfuscation) |
+|     (TLV binary envelope, fixed header, optional padding)    |
 +--------------------------------------------------------------+
 | L0  Transport Layer                                          |
-|     (TCP stream framing  |  QUIC datagram/stream framing)    |
+|     (TCP stream framing)                                     |
 +--------------------------------------------------------------+
 ```
 
-Each layer is independently substitutable. L0 may change (TCP ↔ QUIC)
-without affecting L1–L4. L2 may rotate cipher suites without affecting
-L3/L4 message semantics.
+The MVP fixes L0 to TCP and data-frame encryption to ChaCha20-Poly1305.
+Future profiles may substitute layers only after separate specification.
 
 ### 1.3 Protocol Capabilities
 
@@ -63,10 +58,6 @@ L3/L4 message semantics.
   head-of-line blocking at the application layer; correlation is achieved
   via monotonically increasing per-direction Sequence Numbers combined
   with an explicit `Ack` control message (§5.6).
-- **Obfuscation.** An optional obfuscation mode (flag-gated, §3) removes
-  static, fingerprintable byte patterns (magic bytes, fixed header shape)
-  from the wire by XOR-striping the header with a per-session keystream
-  derived at handshake time, mitigating DPI-based protocol classification.
 
 ---
 
@@ -173,26 +164,30 @@ there).
 
 | Field            | Offset | Size (bytes) | Type      | Description |
 |------------------|--------|--------------|-----------|--------------|
-| Magic            | 0      | 4            | `uint32`  | Fixed constant `0x44475031` (ASCII "DGP1"). Identifies the protocol on a shared port. Absent/randomized in Obfuscated Mode (Flags bit 0). |
+| Magic            | 0      | 4            | `uint32`  | Fixed constant `0x44475031` (ASCII "DGP1"). |
 | Version          | 4      | 1            | `uint8`   | Protocol version. `0x01` for this specification. |
-| Flags            | 5      | 1            | `uint8`   | Bit 0: Obfuscated Mode. Bit 1: Padding Present. Bit 2: 0-RTT Resumption. Bits 3–7: Reserved, MUST be zero. |
+| Flags            | 5      | 1            | `uint8`   | Bit 1: Padding Present. Bits 0 and 2 are post-MVP reservations. Other bits are reserved. MVP senders MUST leave all reserved bits zero; receivers ignore unknown bits. |
 | Msg Type         | 6      | 1            | `uint8`   | See §5 Message Type registry. |
 | Reserved         | 7      | 1            | `uint8`   | MUST be zero on send, ignored on receive. Reserved for alignment / future flags. |
-| Session ID       | 8      | 16           | `bytes16` | Cryptographically random session identifier, assigned at handshake completion. Doubles as a QUIC-style Connection ID for connection migration across network paths. |
+| Session ID       | 8      | 16           | `bytes16` | Session identifier derived from the completed Noise transcript and assigned only after handshake completion. |
 | Sequence Number  | 24     | 8            | `uint64`  | Monotonically increasing per sending direction. Used as AEAD nonce material (§4) and for replay-window validation (§4.4). MUST NOT repeat within a session's cipher key epoch. |
 | Payload Length   | 32     | 4            | `uint32`  | Length of the encrypted payload (ciphertext), **excluding** the AEAD Tag and Padding. |
 | Pad Length       | 36     | 1            | `uint8`   | Length of trailing random padding, 0–255 bytes. |
 | Reserved         | 37     | 3            | —         | Alignment filler, MUST be zero. |
-| Payload          | 40     | variable     | `bytes`   | AEAD ciphertext of the L4 message (or handshake message for Msg Type `0x01`/`0x02`/`0x07`, which MAY be partially or fully unencrypted per handshake phase — see §4). |
-| AEAD Tag         | 40+PL  | 16           | `bytes16` | Authentication tag (Poly1305 or GCM tag, both 128 bits). |
+| Payload          | 40     | variable     | `bytes`   | AEAD ciphertext of the L4 message, or a Noise handshake message for Msg Type `0x01`/`0x02`. |
+| AEAD Tag         | 40+PL  | 0 or 16      | `bytes16` | Absent on handshake frames (`0x01` and `0x02`); otherwise the 128-bit Poly1305 or GCM authentication tag. Noise provides handshake-message authentication internally. |
 | Padding          | ...    | Pad Length   | `bytes`   | Cryptographically random bytes, not covered by the AEAD tag's confidentiality guarantee for content but MAY be included in the AEAD associated data for integrity of the length field (implementation choice, RECOMMENDED). |
+
+Handshake frames use a zero Session ID and Sequence Number because those
+values are established only after the third Noise XX flight completes.
 
 ### 3.3 Length Calculation & Anti-Fingerprinting Padding
 
 Total wire frame size:
 
 ```
-frame_size = 40 (fixed header) + Payload Length + 16 (AEAD tag) + Pad Length
+data_frame_size      = 40 + Payload Length + 16 + Pad Length
+handshake_frame_size = 40 + Payload Length      + Pad Length
 ```
 
 To reduce the effectiveness of packet-length-based traffic classification
@@ -209,70 +204,65 @@ signature.
 
 ## 4. Cryptographic Handshake & Key Exchange
 
-### 4.1 Design Rationale
+### 4.1 MVP Handshake
 
-DGPv1's handshake is constructed using the **Noise Protocol Framework**
-rather than a bespoke Diffie-Hellman + custom-AES construction (as in
-classic MTProto). Two Noise patterns are used, mirroring the "Noise
-Pipes" construction:
-
-- **Noise_XX** — used for the *first* connection between a client and a
-  given server identity, where neither side has cached the other's static
-  public key. Provides mutual authentication with zero prior
-  key knowledge, at the cost of a full 3-message, 1.5-RTT handshake.
-- **Noise_IK** — used for *subsequent* connections once the client has
-  cached the server's static public key from a prior successful `XX`
-  handshake (or from an out-of-band pinned key). Reduces the handshake to
-  2 messages and allows the client to transmit encrypted 0-RTT
-  application data in the first flight.
+The MVP uses only `Noise_XX_25519_ChaChaPoly_SHA256`. It is a three-flight,
+1.5-RTT mutual-authentication handshake. Implementations MUST reject any
+other pattern in the MVP profile.
 
 ### 4.2 Phase 1 — Client Hello / Ephemeral Key Exchange (Msg Type `0x01`)
 
-```
+```text
 HandshakeInit Payload:
 +----------------------+----------+--------------------------------+
 | Field                | Size     | Description                    |
 +----------------------+----------+--------------------------------+
-| Pattern              | 1 byte   | 0x01 = XX, 0x02 = IK           |
+| Pattern              | 1 byte   | MUST be 0x01 (Noise XX)        |
+| Reserved             | 3 bytes  | MUST be zero                   |
 | Client Ephemeral (e) | 32 bytes | X25519 public key              |
-| Encrypted Payload    | variable | Pattern-dependent (see below)  |
 +----------------------+----------+--------------------------------+
 ```
 
-- **Noise_XX, message 1 (`→ e`):** only the ephemeral public key is sent
-  in the clear; no static key material or application data is exposed.
-- **Noise_IK, message 1 (`→ e, es, s, ss`):** the client encrypts its own
-  static public key and optional 0-RTT application payload using a key
-  derived from `DH(client_ephemeral, server_static)`, since the client
-  already possesses the server's static public key.
+Noise XX message 1 is `→ e`. Its payload is exactly 36 bytes in the DGPv1
+wrapper. It carries no Noise payload, static key material, or application data.
 
-### 4.3 Phase 2 — Server Hello / Authentication & Key Derivation (Msg Type `0x02`)
+### 4.3 Phases 2–3 — Authentication & Key Derivation (Msg Type `0x02`)
+
+Noise XX always has three messages. DGPv1 carries both the server's second
+flight and the client's third flight in handshake frames with message type
+`0x02`; direction and handshake state distinguish the two payload shapes.
+Neither frame has an outer DGPv1 AEAD tag.
 
 ```
-HandshakeResponse Payload:
+HandshakeResponse Payload (server → client, Noise XX message 2):
 +------------------------+----------+---------------------------------+
 | Field                  | Size     | Description                     |
 +------------------------+----------+---------------------------------+
 | Server Ephemeral (e)   | 32 bytes | X25519 public key               |
-| Encrypted Static (s)   | variable | Server static key, AEAD-sealed  |
-| Encrypted Payload      | variable | Optional early application data |
+| Noise Payload          | 64 bytes | Encrypted server static key     |
++------------------------+----------+---------------------------------+
+
+HandshakeFinish Payload (client → server, Noise XX message 3):
++------------------------+----------+---------------------------------+
+| Field                  | Size     | Description                     |
++------------------------+----------+---------------------------------+
+| Noise Payload          | 64 bytes | Encrypted client static key     |
 +------------------------+----------+---------------------------------+
 ```
 
-Upon receipt, both parties compute the full Diffie-Hellman transcript
-(`ee`, `es`/`se`, and `ss` depending on pattern) and derive the session
-key schedule via **HKDF-SHA256**, following the Noise `Split()`
-convention: the accumulated handshake chaining key `ck` is expanded into
-two independent, directional 256-bit traffic keys:
+The client and server MUST NOT enter the encrypted-session state or use the
+Session ID until message 3 has been produced or authenticated, respectively.
+At that point both parties compute the full Diffie-Hellman transcript and
+derive the session key schedule via the Noise `Split()` convention. The two
+independent, directional 256-bit traffic keys are the Noise split outputs:
 
 ```
 (k_send, k_recv) = HKDF-SHA256-Expand(ck, "dgpv1 traffic keys", 64)
 ```
 
 `k_send` on the client equals `k_recv` on the server and vice versa. Each
-subsequent data frame is encrypted with **ChaCha20-Poly1305** (default) or
-**AES-256-GCM** (negotiated fallback for hardware with AES-NI and no
-ChaCha20 acceleration), using a 96-bit nonce constructed by
+subsequent MVP data frame MUST be encrypted with **ChaCha20-Poly1305**,
+using a 96-bit nonce constructed by
 zero-extending the 64-bit `Sequence Number` field from the L1 header.
 
 ### 4.4 Session State Machine
@@ -282,9 +272,12 @@ zero-extending the 64-bit `Sequence Number` field from the L1 header.
       |  send/recv HandshakeInit (0x01)
       v
 [ HANDSHAKE_1 ]
-      |  send/recv HandshakeResponse (0x02)
+      |  server sends / client receives Noise message 2 (0x02)
       v
-[ KEYS_DERIVED ]  --- HKDF-SHA256 Split() ---
+[ HANDSHAKE_2 ]
+      |  client sends / server receives Noise message 3 (0x02)
+      v
+[ KEYS_DERIVED ]  --- Noise Split() ---
       v
 [ ENCRYPTED_SESSION ]  <------------------------+
       |  EncryptedData (0x03) / Ping (0x04) /   |
@@ -373,28 +366,6 @@ Validation algorithm for an incoming frame with Sequence Number `n`:
 3. If `n <= highest_seq - window_size`: **reject** unconditionally (frame
    too old to verify against the window).
 
-### 4.6 Zero-RTT Session Resumption
-
-On successful completion of a Noise_XX handshake, the server issues an
-opaque, encrypted **Resumption Ticket** (delivered as an `EncryptedData`
-message immediately following handshake completion) containing the
-negotiated static keys and a short validity window. On reconnect, the
-client presents this ticket inside the `HandshakeInit` (Flags bit 2 set)
-using the Noise_IK pattern, allowing the first flight to simultaneously
-complete authentication **and** carry encrypted application payload,
-achieving effective zero-RTT for the common reconnect case discussed in
-§7 of the companion protocol-design document (session resume after
-transient network loss).
-
-> **0-RTT caveat (MUST be implemented):** data sent in the 0-RTT flight is
-> replayable by a network attacker who captures and re-sends the first
-> flight before the server marks the resumption ticket as consumed.
-> Servers MUST treat 0-RTT-flight application data as at-most-once and
-> non-idempotent-unsafe: only idempotent operations (e.g., `SyncRequest`,
-> `Ping`) may be processed from the 0-RTT payload; state-mutating
-> operations (e.g., `SendMessage`) received in the 0-RTT flight MUST be
-> deferred until the full handshake confirmation completes.
-
 ---
 
 ## 5. Message Types & Control Messages
@@ -409,7 +380,7 @@ transient network loss).
 | 0x04  | Ping / Pong          | Bidirectional  | Yes |
 | 0x05  | SessionClose         | Bidirectional  | Yes |
 | 0x06  | Ack                  | Bidirectional  | Yes |
-| 0x07  | ResumptionTicket      | Server → Client| Yes (extension, required for §4.6) |
+| 0x07  | Reserved (post-MVP resumption ticket) | — | MVP implementations MUST NOT send it |
 | 0x08  | RekeyInit             | Bidirectional  | Yes (under the current epoch key) |
 | 0x09  | Error                 | Bidirectional  | Yes |
 
@@ -462,17 +433,6 @@ transient network loss).
 
 Acks MAY be batched (multiple acknowledged Sequence Numbers in a single
 frame) to reduce control-message overhead under high message throughput.
-
-### 5.6 ResumptionTicket (0x07)
-
-```
-+----------------------+----------+-------------------------------+
-| Field                | Size     | Description                   |
-+----------------------+----------+-------------------------------+
-| Ticket               | variable | Opaque, server-encrypted blob |
-| Valid Until           | 8 bytes  | Unix timestamp (uint64, LE)  |
-+----------------------+----------+-------------------------------+
-```
 
 ---
 
@@ -540,27 +500,27 @@ DGPv1 is designed against the following adversary classes:
 - **DPI / censorship middlebox** — attempting to classify and selectively
   block DGPv1 traffic based on static byte signatures or packet-length
   distributions.
-- **Malicious or compromised relay** — a node forwarding traffic (e.g., a
-  future obfuscation proxy) that must not be able to decrypt session
-  content even if it can observe framing metadata.
+- **Malicious or compromised relay** — a future node forwarding traffic
+  that must not be able to decrypt session content even if it can observe
+  framing metadata.
 
 ### 7.2 Mitigations
 
 | Threat                       | Mitigation |
 |-------------------------------|------------|
-| Passive eavesdropping          | End-to-end AEAD confidentiality (ChaCha20-Poly1305 / AES-256-GCM) established via Noise handshake; forward secrecy from ephemeral X25519 keys. |
-| Active MitM / key substitution | Noise_IK/XX mutual static-key authentication; server static key SHOULD be pinned or anchored to an out-of-band trust root (e.g., delivered via the existing TLS-secured `auth` gRPC service) rather than trusted-on-first-use in production. |
+| Passive eavesdropping          | End-to-end ChaCha20-Poly1305 confidentiality established via Noise XX; forward secrecy from ephemeral X25519 keys. |
+| Active MitM / key substitution | Noise XX mutual static-key authentication; the server static key SHOULD be pinned or anchored to an out-of-band trust root rather than trusted on first use in production. |
 | Message replay                 | 64-bit sliding replay window (§4.5) per session per direction; Sequence Number reuse within a key epoch is prohibited by the rekeying policy (§4.4). |
-| Ciphertext malleability         | AEAD (both candidate ciphers) provides integrity and authenticity, not merely confidentiality; any bit-flip invalidates the Poly1305/GCM tag. |
-| Downgrade attacks               | Version and cipher/pattern negotiation fields are themselves covered by the handshake transcript hash, so a MitM cannot silently force a weaker configuration without detection at handshake completion. |
-| Traffic analysis / fingerprinting | Optional obfuscation mode strips static magic bytes; length-bucketed random padding (§3.3) reduces packet-length-based classification. |
-| Nonce reuse                     | Sequence-Number-derived nonces combined with mandatory rekeying bound the ciphertext volume per key, keeping usage within safe margins for both ChaCha20-Poly1305 and AES-256-GCM. |
+| Ciphertext malleability         | ChaCha20-Poly1305 provides integrity and authenticity; any ciphertext or tag modification fails authentication. |
+| Downgrade attacks               | The MVP has no cipher or handshake-pattern negotiation; peers MUST use the fixed profile in §4.1. |
+| Traffic analysis / fingerprinting | Random padding and optional length bucketing (§3.3) reduce packet-length-based classification; the MVP does not conceal its fixed magic bytes. |
+| Nonce reuse                     | Sequence-Number-derived nonces combined with mandatory rekeying bound the ciphertext volume per key, keeping usage within safe margins for ChaCha20-Poly1305. |
 
 ### 7.3 Implementation Risk Disclosure
 
 This specification defines a protocol built from well-studied, formally
 analyzed primitives (Noise Protocol Framework, X25519, ChaCha20-Poly1305,
-AES-256-GCM, HKDF-SHA256). Composition of individually secure primitives
+HKDF-SHA256). Composition of individually secure primitives
 into a new protocol is nonetheless a well-known source of subtle,
 practically exploitable flaws (nonce derivation errors, transcript
 binding omissions, replay-window off-by-ones, side channels in
@@ -570,16 +530,27 @@ non-constant-time comparisons). Accordingly:
    from maintained, widely reviewed libraries (§6), never reimplemented
    from this document's description alone.
 2. This specification has not undergone third-party formal security
-   review or a symbolic/computational proof pass (e.g., via ProVerif,
-   Tamarin, or a Noise-specific formal analysis of the exact pattern and
-   extensions defined here, including the custom 0-RTT ticket mechanism
-   in §4.6, which is a DGPv1-specific addition not covered by the
-   upstream Noise specification's own analysis).
+   review or a symbolic/computational proof pass of the exact profile and
+   extensions defined here.
 3. Prior to any production deployment handling real user data, an
    independent cryptographic security audit of both this specification
-   and its concrete implementation is strongly RECOMMENDED, with
-   particular attention to the 0-RTT replay surface described in §4.6.
+   and its concrete implementation is strongly RECOMMENDED.
 
 ---
+
+## 8. Historical / Post-MVP Design Notes (Non-Normative)
+
+Earlier DGPv1 drafts proposed the following extensions. They are retained as
+protocol history only. Normative terms in this section do not apply to the MVP.
+An MVP implementation MUST NOT require, advertise, or send them:
+
+- QUIC datagram or stream transport and connection migration.
+- Header or transport obfuscation.
+- The Noise IK handshake pattern.
+- Resumption tickets (`0x07`).
+- 0-RTT application data.
+
+These ideas require a future versioned profile with complete wire semantics,
+negotiation, downgrade protection, replay policy, and interoperability tests.
 
 *End of DGPv1 Specification.*

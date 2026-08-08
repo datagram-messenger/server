@@ -1,0 +1,38 @@
+{
+  "schema": "dgpv1-wire-v1",
+  "vectors": [
+    {
+      "name": "header-ping",
+      "kind": "header",
+      "wire_hex": "44475031010004000000000000000000000000000000000001000000000000000900000000000000",
+      "valid": true
+    },
+    {
+      "name": "header-reserved-receive-fields",
+      "kind": "header",
+      "wire_hex": "44475031018004000000000000000000000000000000000001000000000000000900000000000000",
+      "valid": true
+    },
+    {
+      "name": "header-short",
+      "kind": "header",
+      "wire_hex": "44475031",
+      "valid": false,
+      "error": "ErrHeaderTooShort"
+    },
+    {
+      "name": "header-bad-magic",
+      "kind": "header",
+      "wire_hex": "58475031010004000000000000000000000000000000000001000000000000000900000000000000",
+      "valid": false,
+      "error": "ErrInvalidMagic"
+    },
+    {
+      "name": "header-padding-flag-mismatch",
+      "kind": "header",
+      "wire_hex": "44475031010204000000000000000000000000000000000001000000000000000900000000000000",
+      "valid": false,
+      "error": "ErrPaddingFlag"
+    }
+  ]
+}
