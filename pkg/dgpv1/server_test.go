@@ -182,11 +182,9 @@ func TestServerDisallowedClient(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_ = server.Serve(listener)
-	}()
+	})
 	defer func() {
 		_ = server.Close()
 		wg.Wait()

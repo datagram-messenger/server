@@ -53,7 +53,7 @@ type Session struct {
 	rekeyInterval   time.Duration
 	now             func() time.Time
 	activeSends     int64
-	rekeySuppressed uint32
+	rekeySuppressed atomic.Uint32
 	closed          bool
 
 	receiveMu       sync.Mutex
@@ -181,14 +181,14 @@ func (s *Session) sendPayload(messageType MessageType, plaintext []byte, padLeng
 	if s.closed {
 		return Frame{}, ErrSessionClosed
 	}
-	if messageType != MessageTypeRekeyInit && atomic.LoadUint32(&s.rekeySuppressed) == 0 &&
+	if messageType != MessageTypeRekeyInit && s.rekeySuppressed.Load() == 0 &&
 		observedEpoch == atomic.LoadUint32(&s.sendEpoch) && s.rekeyDueLocked() {
 		if atomic.LoadInt64(&s.activeSends) == 1 {
 			time.Sleep(time.Millisecond)
 		}
 		frame, err := s.startRekeyLocked(padLength)
 		if err == nil && atomic.LoadInt64(&s.activeSends) > 1 {
-			atomic.StoreUint32(&s.rekeySuppressed, 1)
+			s.rekeySuppressed.Store(1)
 		}
 		return frame, err
 	}
@@ -205,7 +205,7 @@ func (s *Session) finishSend() {
 			return
 		}
 	}
-	atomic.StoreUint32(&s.rekeySuppressed, 0)
+	s.rekeySuppressed.Store(0)
 }
 
 func (s *Session) encryptLocked(messageType MessageType, plaintext []byte, padLength uint8) (Frame, error) {

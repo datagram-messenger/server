@@ -79,10 +79,7 @@ func DecodeTLVs(data []byte, maxBytes int) ([]TLV, error) {
 		return nil, fmt.Errorf("%w: got %d bytes, limit %d", ErrTLVDecodeLimit, len(data), maxBytes)
 	}
 
-	capacity := len(data) / 4
-	if capacity > MaxTLVElements {
-		capacity = MaxTLVElements
-	}
+	capacity := min(len(data)/4, MaxTLVElements)
 	out := make([]TLV, 0, capacity)
 	for offset := 0; offset < len(data); {
 		if len(out) == MaxTLVElements {
