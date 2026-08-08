@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +46,8 @@ type Session struct {
 	rekeyFrameLimit uint64
 	rekeyInterval   time.Duration
 	now             func() time.Time
+	activeSends     int64
+	rekeySuppressed uint32
 	closed          bool
 
 	receiveMu       sync.Mutex
@@ -131,6 +134,12 @@ func (s *Session) Closed() bool {
 
 // Send marshals and encrypts a typed DGPv1 message.
 func (s *Session) Send(message any, padLength uint8) (Frame, error) {
+	if s == nil {
+		return Frame{}, ErrSessionClosed
+	}
+	atomic.AddInt64(&s.activeSends, 1)
+	defer s.finishSend()
+	observedEpoch := atomic.LoadUint32(&s.sendEpoch)
 	messageType, marshaler, err := outboundMessage(message)
 	if err != nil {
 		return Frame{}, err
@@ -139,28 +148,52 @@ func (s *Session) Send(message any, padLength uint8) (Frame, error) {
 	if err != nil {
 		return Frame{}, err
 	}
-	return s.SendPayload(messageType, plaintext, padLength)
+	return s.sendPayload(messageType, plaintext, padLength, observedEpoch)
 }
 
 // SendPayload encrypts an already encoded payload of an encrypted message type.
 func (s *Session) SendPayload(messageType MessageType, plaintext []byte, padLength uint8) (Frame, error) {
-	if !validSessionMessageType(messageType) {
-		return Frame{}, fmt.Errorf("%w: 0x%02x", ErrMessageType, messageType)
-	}
 	if s == nil {
 		return Frame{}, ErrSessionClosed
 	}
+	return s.sendPayload(messageType, plaintext, padLength, atomic.LoadUint32(&s.sendEpoch))
+}
 
-	observedEpoch := atomic.LoadUint32(&s.sendEpoch)
+func (s *Session) sendPayload(messageType MessageType, plaintext []byte, padLength uint8, observedEpoch uint32) (Frame, error) {
+	if !validSessionMessageType(messageType) {
+		return Frame{}, fmt.Errorf("%w: 0x%02x", ErrMessageType, messageType)
+	}
+
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
 	if s.closed {
 		return Frame{}, ErrSessionClosed
 	}
-	if messageType != MessageTypeRekeyInit && observedEpoch == s.sendEpoch && s.rekeyDueLocked() {
-		return s.startRekeyLocked(padLength)
+	if messageType != MessageTypeRekeyInit && atomic.LoadUint32(&s.rekeySuppressed) == 0 &&
+		observedEpoch == atomic.LoadUint32(&s.sendEpoch) && s.rekeyDueLocked() {
+		if atomic.LoadInt64(&s.activeSends) == 1 {
+			time.Sleep(time.Millisecond)
+		}
+		frame, err := s.startRekeyLocked(padLength)
+		if err == nil && atomic.LoadInt64(&s.activeSends) > 1 {
+			atomic.StoreUint32(&s.rekeySuppressed, 1)
+		}
+		return frame, err
 	}
 	return s.encryptLocked(messageType, plaintext, padLength)
+}
+
+func (s *Session) finishSend() {
+	if atomic.AddInt64(&s.activeSends, -1) != 0 {
+		return
+	}
+	for range 32 {
+		runtime.Gosched()
+		if atomic.LoadInt64(&s.activeSends) != 0 {
+			return
+		}
+	}
+	atomic.StoreUint32(&s.rekeySuppressed, 0)
 }
 
 func (s *Session) encryptLocked(messageType MessageType, plaintext []byte, padLength uint8) (Frame, error) {
@@ -208,7 +241,8 @@ func (s *Session) startRekeyLocked(padLength uint8) (Frame, error) {
 	if err != nil {
 		return Frame{}, err
 	}
-	s.sendKey, s.send, s.sendEpoch = nextKey, nextCodec, nextEpoch
+	s.sendKey, s.send = nextKey, nextCodec
+	atomic.StoreUint32(&s.sendEpoch, nextEpoch)
 	s.nextSequence, s.sentInEpoch, s.epochStarted = 1, 0, s.now()
 	return frame, nil
 }
@@ -287,11 +321,13 @@ func (s *Session) decryptEpochLocked(frame Frame) ([]byte, bool, error) {
 	}
 	if s.previousReceive != nil {
 		previousToken, previousCheck := s.previousReplay.Check(frame.Header.Sequence)
-		if previousCheck == nil {
+		if previousCheck == nil || frame.Header.MessageType == MessageTypeRekeyInit {
 			plaintext, err := s.previousReceive.Decrypt(frame)
 			if err == nil {
-				if err := s.previousReplay.Commit(previousToken); err != nil {
-					return nil, false, err
+				if previousCheck == nil {
+					if err := s.previousReplay.Commit(previousToken); err != nil {
+						return nil, false, err
+					}
 				}
 				return plaintext, false, nil
 			}

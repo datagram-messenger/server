@@ -299,11 +299,58 @@ zero-extending the 64-bit `Sequence Number` field from the L1 header.
 [ CLOSED ]
 ```
 
-Rekeying (a fresh HKDF expansion from a rachet of the chaining key) is
-triggered every 2^32 frames or every 10 minutes of session lifetime,
-whichever occurs first, bounding the amount of ciphertext encrypted under
-a single key — a standard AEAD hygiene practice given ChaCha20-Poly1305's
-and AES-GCM's nonce-reuse sensitivity.
+#### 4.4.1 Rekeying
+
+Rekeying is directional. The handshake establishes epoch `1` independently
+for each sending direction. A sender MUST initiate the next epoch before
+encrypting further application traffic when either 2^32 frames have been
+sent in the current epoch or 10 minutes have elapsed since that epoch began.
+Concurrent senders observing one trigger boundary MUST produce exactly one
+`RekeyInit`; the remaining sends continue after that transition.
+
+`RekeyInit` uses message type `0x08` and is encrypted under the current
+epoch's traffic key. Its plaintext is exactly 36 bytes:
+
+```
++----------------------+----------+------------------------------------+
+| Field                | Size     | Description                        |
++----------------------+----------+------------------------------------+
+| Epoch                | 4 bytes  | Next uint32 epoch, little-endian   |
+| Key Confirm          | 32 bytes | HMAC-SHA256 confirmation           |
++----------------------+----------+------------------------------------+
+```
+
+For current directional traffic secret `K` and proposed epoch `E`, the sender
+MUST compute:
+
+```
+KeyConfirm = HMAC-SHA256(K, "DGPv1 Rekey Confirm" || LE32(E))
+K_next     = HMAC-SHA256(K, "DGPv1 Rekey Send Key")
+```
+
+The label `"DGPv1 Rekey Receive Key"` is reserved as the receive-labelled
+output of the key-ratchet API. On the wire, both peers ratchet the same
+directional secret with the send label, so the sender's next send key equals
+the receiver's next receive key.
+
+The sender MUST transmit `RekeyInit` as the final frame of epoch `E-1`, then
+install `K_next`, set the directional epoch to `E`, and reset that direction's
+Sequence Number to `1`. The receiver MUST authenticate the frame under the
+old key, require `E` to equal its current epoch plus one, verify `KeyConfirm`
+in constant time, install `K_next`, reset the new epoch replay window, and
+then accept new-epoch frames beginning at Sequence Number `1`.
+
+After accepting a rekey, a receiver MAY accept delayed non-rekey frames from
+the immediately previous epoch for at most 2048 current-epoch frames and 30
+seconds, whichever expires first. Previous-epoch frames remain subject to
+their own replay window. A `RekeyInit` authenticated under the previous key
+MUST be rejected as a duplicate or rollback even when its sequence was
+already seen; it MUST NOT be reported as a generic authentication failure.
+Epoch zero, duplicate or rollback epochs, skipped or future epochs, and epoch
+advance past `uint32` maximum MUST be rejected. An invalid confirmation MUST
+be rejected without changing keys, epoch, sequence state, replay state, or
+grace state. Frames that authenticate under neither current nor retained
+previous keys MUST be rejected as authentication failures.
 
 ### 4.5 Replay Window Mechanics
 
@@ -363,6 +410,8 @@ transient network loss).
 | 0x05  | SessionClose         | Bidirectional  | Yes |
 | 0x06  | Ack                  | Bidirectional  | Yes |
 | 0x07  | ResumptionTicket      | Server → Client| Yes (extension, required for §4.6) |
+| 0x08  | RekeyInit             | Bidirectional  | Yes (under the current epoch key) |
+| 0x09  | Error                 | Bidirectional  | Yes |
 
 ### 5.2 EncryptedData (0x03) Payload
 
