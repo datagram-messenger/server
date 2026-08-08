@@ -121,7 +121,9 @@ func (t *TCPTransport) watchContext(ctx context.Context, read bool) (func(), err
 		return nil, err
 	}
 	done := make(chan struct{})
+	exited := make(chan struct{})
 	go func() {
+		defer close(exited)
 		select {
 		case <-ctx.Done():
 			if read {
@@ -134,6 +136,9 @@ func (t *TCPTransport) watchContext(ctx context.Context, read bool) (func(), err
 	}()
 	return func() {
 		close(done)
+		// Wait for a concurrently selected cancellation branch before clearing
+		// its deadline. Otherwise it can poison the next serialized operation.
+		<-exited
 		if read {
 			_ = t.conn.SetReadDeadline(time.Time{})
 		} else {

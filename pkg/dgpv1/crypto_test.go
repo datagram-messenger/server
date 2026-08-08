@@ -66,6 +66,7 @@ func TestCodecRejectsInvalidEncryptedHeader(t *testing.T) {
 		{"handshake type", MessageTypeHandshakeInit, [16]byte{1}, 1, ErrUnencryptedType},
 		{"zero session", MessageTypeEncryptedData, [16]byte{}, 1, ErrInvalidSessionID},
 		{"zero sequence", MessageTypeEncryptedData, [16]byte{1}, 0, ErrInvalidSequence},
+		{"reserved resumption type", MessageTypeResumptionTicket, [16]byte{1}, 1, ErrUnencryptedType},
 		{"unknown type", 0xff, [16]byte{1}, 1, ErrUnencryptedType},
 	}
 	for _, tt := range tests {

@@ -10,7 +10,8 @@ import (
 const (
 	// HandshakeInitFixedSize is the 36-byte Noise XX message-one wrapper size.
 	HandshakeInitFixedSize = 36
-	// HandshakeResponseFixedSize is the 32-byte server-ephemeral prefix size.
+	// HandshakeResponseFixedSize is the 32-byte server-ephemeral prefix size;
+	// the complete MVP response is this prefix followed by exactly 64 Noise bytes.
 	HandshakeResponseFixedSize = 32
 	// HandshakeFinishFixedSize is the 64-byte Noise XX final-flight size.
 	HandshakeFinishFixedSize = 64
@@ -18,8 +19,8 @@ const (
 	PingPongSize = 9
 	// RekeyInitSize is the fixed rekey payload size.
 	RekeyInitSize = 36
-	// MaxAckSequences is the largest number of sequences in one Ack.
-	MaxAckSequences = 64
+	// MaxAckSequences is the largest count representable by the Ack wire field.
+	MaxAckSequences = 255
 	// MaxEncryptedPayloadSize excludes the header and 16-byte AEAD tag.
 	MaxEncryptedPayloadSize = MaxFrameSize - HeaderSize - AEADTagSize
 	// MaxHandshakePayloadSize excludes the header; handshakes have no outer tag.
@@ -49,7 +50,7 @@ var (
 	// ErrInvalidPingResponse indicates that the ping response byte is neither zero nor one.
 	ErrInvalidPingResponse = errors.New("dgpv1: invalid ping response flag")
 	// ErrAckCount indicates that an acknowledgement contains fewer than one or more than MaxAckSequences entries.
-	ErrAckCount = errors.New("dgpv1: acknowledgement count must be between 1 and 64")
+	ErrAckCount = errors.New("dgpv1: acknowledgement count must be between 1 and 255")
 	// ErrInvalidUTF8 indicates that a textual message field is not valid UTF-8.
 	ErrInvalidUTF8 = errors.New("dgpv1: text is not valid UTF-8")
 	// ErrReasonTooLong indicates that a textual message field exceeds MaxReasonSize.
@@ -143,14 +144,11 @@ type HandshakeResponse struct {
 	NoisePayload []byte
 }
 
-// MarshalBinary encodes m as a handshake-response payload and returns owned storage.
+// MarshalBinary encodes the exact 96-byte MVP handshake response and returns owned storage.
 func (m HandshakeResponse) MarshalBinary() ([]byte, error) {
 	total := HandshakeResponseFixedSize + len(m.NoisePayload)
-	if total > MaxHandshakePayloadSize {
-		return nil, fmt.Errorf("%w: got %d, limit %d", ErrMessageLength, total, MaxHandshakePayloadSize)
-	}
-	if total%4 != 0 {
-		return nil, ErrHandshakeAlignment
+	if total != HandshakeResponseFixedSize+64 {
+		return nil, fmt.Errorf("%w: got %d, want %d", ErrMessageLength, total, HandshakeResponseFixedSize+64)
 	}
 	buf := make([]byte, total)
 	copy(buf[:32], m.ServerEphemeral[:])
@@ -158,16 +156,10 @@ func (m HandshakeResponse) MarshalBinary() ([]byte, error) {
 	return buf, nil
 }
 
-// UnmarshalBinary decodes a handshake-response payload and copies NoisePayload.
+// UnmarshalBinary decodes exactly one 96-byte MVP handshake response and copies NoisePayload.
 func (m *HandshakeResponse) UnmarshalBinary(data []byte) error {
-	if len(data) < HandshakeResponseFixedSize {
-		return fmt.Errorf("%w: got %d, want at least %d", ErrMessageTooShort, len(data), HandshakeResponseFixedSize)
-	}
-	if len(data) > MaxHandshakePayloadSize {
-		return fmt.Errorf("%w: got %d, limit %d", ErrMessageLength, len(data), MaxHandshakePayloadSize)
-	}
-	if len(data)%4 != 0 {
-		return ErrHandshakeAlignment
+	if len(data) != HandshakeResponseFixedSize+64 {
+		return fmt.Errorf("%w: got %d, want %d", ErrMessageLength, len(data), HandshakeResponseFixedSize+64)
 	}
 	var ephemeral [32]byte
 	copy(ephemeral[:], data[:32])
@@ -316,7 +308,7 @@ func (m *PingPong) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-// Ack selectively acknowledges one to 64 sequence numbers.
+// Ack selectively acknowledges one to 255 sequence numbers.
 type Ack struct {
 	// Sequences contains the acknowledged sequence numbers.
 	Sequences []uint64
@@ -356,6 +348,8 @@ func (m *Ack) UnmarshalBinary(data []byte) error {
 }
 
 // RekeyInit announces a new epoch and carries its key confirmation value.
+// Session generates outbound values internally; callers cannot send one through
+// Send or SendPayload.
 type RekeyInit struct {
 	// Epoch is the nonzero proposed key epoch.
 	Epoch uint32

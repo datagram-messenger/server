@@ -426,7 +426,7 @@ Validation algorithm for an incoming frame with Sequence Number `n`:
 +----------------------+----------+---------------------------------+
 | Field                | Size     | Description                     |
 +----------------------+----------+---------------------------------+
-| Acked Sequence Count | 1 byte   | Number of entries following     |
+| Acked Sequence Count | 1 byte   | Number of entries, 1–255        |
 | Acked Sequences[]    | 8*N bytes| List of Sequence Numbers acked  |
 +----------------------+----------+---------------------------------+
 ```

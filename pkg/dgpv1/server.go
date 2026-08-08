@@ -325,9 +325,6 @@ func validateHandshakeFrame(frame Frame, expected MessageType) error {
 	if frame.Header.Sequence != 0 {
 		return fmt.Errorf("%w: handshake sequence must be zero", ErrHandshakeFailed)
 	}
-	if frame.Header.Flags&^FlagPadding != 0 {
-		return fmt.Errorf("%w: handshake reserved flags must be zero", ErrHandshakeFailed)
-	}
 	if err := frame.ValidateReceive(); err != nil {
 		return fmt.Errorf("%w: %v", ErrHandshakeFailed, err)
 	}

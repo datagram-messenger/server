@@ -194,3 +194,32 @@ func TestTCPTransportContextCancellation(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestTCPTransportCompletedOperationDoesNotLeakCancellationDeadline(t *testing.T) {
+	a, b := net.Pipe()
+	defer a.Close()
+	defer b.Close()
+	transport := NewTCPTransport(a)
+	first := testTransportFrame(t, 1, []byte("first"))
+	second := testTransportFrame(t, 2, []byte("second"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	firstWrite := make(chan error, 1)
+	go func() { firstWrite <- transport.WriteFrame(ctx, first) }()
+	if _, err := io.ReadFull(b, make([]byte, len(framedBytes(t, first)))); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-firstWrite; err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+
+	secondWrite := make(chan error, 1)
+	go func() { secondWrite <- transport.WriteFrame(context.Background(), second) }()
+	if _, err := io.ReadFull(b, make([]byte, len(framedBytes(t, second)))); err != nil {
+		t.Fatalf("second write was poisoned by stale deadline: %v", err)
+	}
+	if err := <-secondWrite; err != nil {
+		t.Fatalf("second write was poisoned by stale deadline: %v", err)
+	}
+}

@@ -57,7 +57,7 @@ func TestHandshakeWrappersRoundTripAndOwnership(t *testing.T) {
 	if !reflect.DeepEqual(got, ik) {
 		t.Fatalf("got %#v want %#v", got, ik)
 	}
-	resp := HandshakeResponse{ServerEphemeral: e, NoisePayload: []byte{5, 6, 7, 8}}
+	resp := HandshakeResponse{ServerEphemeral: e, NoisePayload: bytes.Repeat([]byte{5}, 64)}
 	wire, err = resp.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestEncryptedDataTLVsRoundTripUnknownAndOwnership(t *testing.T) {
 }
 
 func TestAckBoundariesRoundTripAndOwnership(t *testing.T) {
-	for _, n := range []int{1, 64} {
+	for _, n := range []int{1, MaxAckSequences} {
 		seq := make([]uint64, n)
 		for i := range seq {
 			seq[i] = uint64(i + 1)
@@ -119,7 +119,7 @@ func TestAckBoundariesRoundTripAndOwnership(t *testing.T) {
 			t.Fatal("Ack aliases input")
 		}
 	}
-	for _, n := range []int{0, 65} {
+	for _, n := range []int{0, MaxAckSequences + 1} {
 		if _, err := (Ack{Sequences: make([]uint64, n)}).MarshalBinary(); !errors.Is(err, ErrAckCount) {
 			t.Fatalf("count %d: %v", n, err)
 		}

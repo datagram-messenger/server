@@ -156,6 +156,12 @@ func TestSessionCloseAndValidation(t *testing.T) {
 	if _, err := client.SendPayload(MessageTypeHandshakeInit, nil, 0); !errors.Is(err, ErrMessageType) {
 		t.Fatalf("invalid type error = %v", err)
 	}
+	if _, err := client.Send(RekeyInit{Epoch: 2}, 0); !errors.Is(err, ErrMessageType) {
+		t.Fatalf("manual rekey error = %v", err)
+	}
+	if _, err := client.SendPayload(MessageTypeRekeyInit, make([]byte, RekeyInitSize), 0); !errors.Is(err, ErrMessageType) {
+		t.Fatalf("manual rekey payload error = %v", err)
+	}
 	frame, err := client.Send(PingPong{Nonce: 1}, 0)
 	if err != nil {
 		t.Fatal(err)

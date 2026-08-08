@@ -346,7 +346,6 @@ func TestValidateHandshakeFrame(t *testing.T) {
 		{"message type", func(f *Frame) { f.Header.MessageType = MessageTypeHandshakeResponse }},
 		{"session ID", func(f *Frame) { f.Header.SessionID[0] = 1 }},
 		{"sequence", func(f *Frame) { f.Header.Sequence = 1 }},
-		{"reserved flags", func(f *Frame) { f.Header.Flags = FlagObfuscated }},
 		{"padding flag mismatch", func(f *Frame) { f.Header.Flags = FlagPadding }},
 		{"payload length mismatch", func(f *Frame) { f.Header.PayloadLength++ }},
 	}
