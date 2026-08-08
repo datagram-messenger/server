@@ -48,8 +48,20 @@ type ServerConfig struct {
 	// KeepaliveInterval controls how often an encrypted Ping is sent.
 	KeepaliveInterval time.Duration
 
+	// KeepaliveTimeout controls how long an outstanding Ping may remain unacknowledged.
+	KeepaliveTimeout time.Duration
+
 	// OutboundQueue sets the channel capacity for buffered outbound messages.
 	OutboundQueue int
+
+	// HandlerQueue bounds pending per-connection handler work.
+	HandlerQueue int
+
+	// MaxConcurrentHandshakes limits TCP connections concurrently performing a handshake.
+	MaxConcurrentHandshakes int
+
+	// MaxActiveConnections limits authenticated connections retained by the server.
+	MaxActiveConnections int
 
 	// Handler processes authenticated inbound messages received on active connections.
 	Handler MessageHandler
@@ -58,13 +70,16 @@ type ServerConfig struct {
 // Server accepts incoming TCP connections, completes Noise XX handshakes,
 // and manages connection lifecycles.
 type Server struct {
-	config     ServerConfig
-	listener   net.Listener
-	mu         sync.Mutex
-	conns      map[*Connection]struct{}
-	closed     chan struct{}
-	inShutdown atomic.Bool
-	wg         sync.WaitGroup
+	config         ServerConfig
+	listener       net.Listener
+	mu             sync.Mutex
+	conns          map[*Connection]struct{}
+	handshakeConns map[net.Conn]struct{}
+	handshakes     chan struct{}
+	connSlots      chan struct{}
+	closed         chan struct{}
+	inShutdown     atomic.Bool
+	wg             sync.WaitGroup
 }
 
 // NewServer constructs a Server instance with applied defaults for unconfigured timeouts.
@@ -72,16 +87,49 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if config.CipherSuite == 0 {
 		config.CipherSuite = CipherChaCha20Poly1305
 	}
-	if config.HandshakeTimeout <= 0 {
+	if config.CipherSuite != CipherChaCha20Poly1305 {
+		return nil, fmt.Errorf("%w: DGPv1 requires ChaCha20-Poly1305", ErrUnsupportedCipher)
+	}
+	if config.HandshakeTimeout < 0 {
+		return nil, errors.New("dgpv1: HandshakeTimeout must not be negative")
+	}
+	if config.HandshakeTimeout == 0 {
 		config.HandshakeTimeout = 10 * time.Second
 	}
-	if config.OutboundQueue <= 0 {
+	if config.OutboundQueue < 0 {
+		return nil, errors.New("dgpv1: OutboundQueue must not be negative")
+	}
+	if config.OutboundQueue == 0 {
 		config.OutboundQueue = 16
 	}
+	if config.HandlerQueue < 0 {
+		return nil, errors.New("dgpv1: HandlerQueue must not be negative")
+	}
+	if config.HandlerQueue == 0 {
+		config.HandlerQueue = 16
+	}
+	if config.KeepaliveTimeout < 0 {
+		return nil, errors.New("dgpv1: KeepaliveTimeout must not be negative")
+	}
+	if config.MaxConcurrentHandshakes < 0 {
+		return nil, errors.New("dgpv1: MaxConcurrentHandshakes must not be negative")
+	}
+	if config.MaxConcurrentHandshakes == 0 {
+		config.MaxConcurrentHandshakes = 64
+	}
+	if config.MaxActiveConnections < 0 {
+		return nil, errors.New("dgpv1: MaxActiveConnections must not be negative")
+	}
+	if config.MaxActiveConnections == 0 {
+		config.MaxActiveConnections = 1024
+	}
 	return &Server{
-		config: config,
-		conns:  make(map[*Connection]struct{}),
-		closed: make(chan struct{}),
+		config:         config,
+		conns:          make(map[*Connection]struct{}),
+		handshakeConns: make(map[net.Conn]struct{}),
+		handshakes:     make(chan struct{}, config.MaxConcurrentHandshakes),
+		connSlots:      make(chan struct{}, config.MaxActiveConnections),
+		closed:         make(chan struct{}),
 	}, nil
 }
 
@@ -107,6 +155,16 @@ func (s *Server) Serve(listener net.Listener) error {
 			return err
 		}
 
+		if !s.tryAcquire(s.handshakes) {
+			_ = netConn.Close()
+			continue
+		}
+		if !s.registerHandshake(netConn) {
+			s.release(s.handshakes)
+			_ = netConn.Close()
+			continue
+		}
+
 		s.wg.Add(1)
 		go func(c net.Conn) {
 			defer s.wg.Done()
@@ -123,15 +181,27 @@ func (s *Server) Close() error {
 	close(s.closed)
 
 	s.mu.Lock()
-	var err error
-	if s.listener != nil {
-		err = s.listener.Close()
-	}
+	listener := s.listener
+	conns := make([]*Connection, 0, len(s.conns))
 	for conn := range s.conns {
-		_ = conn.Close()
+		conns = append(conns, conn)
+	}
+	handshakeConns := make([]net.Conn, 0, len(s.handshakeConns))
+	for conn := range s.handshakeConns {
+		handshakeConns = append(handshakeConns, conn)
 	}
 	s.mu.Unlock()
 
+	var err error
+	if listener != nil {
+		err = listener.Close()
+	}
+	for _, conn := range handshakeConns {
+		_ = conn.Close()
+	}
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
 	s.wg.Wait()
 	return err
 }
@@ -142,18 +212,27 @@ func (s *Server) handleConn(netConn net.Conn) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.HandshakeTimeout)
 	session, err := s.performHandshake(ctx, transport)
 	cancel()
+	s.unregisterHandshake(netConn)
+	s.release(s.handshakes)
 	if err != nil {
 		_ = transport.Close()
 		return
 	}
+	if !s.tryAcquire(s.connSlots) {
+		_ = transport.Close()
+		return
+	}
+	defer s.release(s.connSlots)
 
 	connConfig := ConnectionConfig{
 		OutboundQueue:     s.config.OutboundQueue,
+		HandlerQueue:      s.config.HandlerQueue,
 		HandshakeTimeout:  s.config.HandshakeTimeout,
 		ReadTimeout:       s.config.ReadTimeout,
 		WriteTimeout:      s.config.WriteTimeout,
 		IdleTimeout:       s.config.IdleTimeout,
 		KeepaliveInterval: s.config.KeepaliveInterval,
+		KeepaliveTimeout:  s.config.KeepaliveTimeout,
 		Handler:           s.config.Handler,
 	}
 
@@ -188,8 +267,8 @@ func (s *Server) performHandshake(ctx context.Context, transport *TCPTransport) 
 	if err != nil {
 		return nil, err
 	}
-	if frame1.Header.MessageType != MessageTypeHandshakeInit {
-		return nil, fmt.Errorf("%w: expected handshake init, got 0x%02x", ErrHandshakeFailed, frame1.Header.MessageType)
+	if err := validateHandshakeFrame(frame1, MessageTypeHandshakeInit); err != nil {
+		return nil, err
 	}
 	if err := responder.ReadFlight(frame1.Payload); err != nil {
 		return nil, err
@@ -211,8 +290,8 @@ func (s *Server) performHandshake(ctx context.Context, transport *TCPTransport) 
 	if err != nil {
 		return nil, err
 	}
-	if frame3.Header.MessageType != MessageTypeHandshakeResponse {
-		return nil, fmt.Errorf("%w: expected handshake response, got 0x%02x", ErrHandshakeFailed, frame3.Header.MessageType)
+	if err := validateHandshakeFrame(frame3, MessageTypeHandshakeResponse); err != nil {
+		return nil, err
 	}
 	if err := responder.ReadFlight(frame3.Payload); err != nil {
 		return nil, err
@@ -234,6 +313,54 @@ func (s *Server) performHandshake(ctx context.Context, transport *TCPTransport) 
 	}
 
 	return NewSessionFromHandshake(s.config.CipherSuite, result)
+}
+
+func validateHandshakeFrame(frame Frame, expected MessageType) error {
+	if frame.Header.MessageType != expected {
+		return fmt.Errorf("%w: expected handshake type 0x%02x, got 0x%02x", ErrHandshakeFailed, expected, frame.Header.MessageType)
+	}
+	if frame.Header.SessionID != ([16]byte{}) {
+		return fmt.Errorf("%w: handshake session ID must be zero", ErrHandshakeFailed)
+	}
+	if frame.Header.Sequence != 0 {
+		return fmt.Errorf("%w: handshake sequence must be zero", ErrHandshakeFailed)
+	}
+	if frame.Header.Flags&^FlagPadding != 0 {
+		return fmt.Errorf("%w: handshake reserved flags must be zero", ErrHandshakeFailed)
+	}
+	if err := frame.ValidateReceive(); err != nil {
+		return fmt.Errorf("%w: %v", ErrHandshakeFailed, err)
+	}
+	return nil
+}
+
+func (s *Server) tryAcquire(slots chan struct{}) bool {
+	select {
+	case slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) release(slots chan struct{}) {
+	<-slots
+}
+
+func (s *Server) registerHandshake(conn net.Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.inShutdown.Load() {
+		return false
+	}
+	s.handshakeConns[conn] = struct{}{}
+	return true
+}
+
+func (s *Server) unregisterHandshake(conn net.Conn) {
+	s.mu.Lock()
+	delete(s.handshakeConns, conn)
+	s.mu.Unlock()
 }
 
 func (s *Server) registerConn(conn *Connection) bool {

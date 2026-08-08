@@ -2,6 +2,7 @@ package dgpv1
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
 	"testing"
@@ -157,6 +158,210 @@ func TestServerHandshakeAndDataTransfer(t *testing.T) {
 	}
 
 	_ = clientSession.Close()
+}
+
+func TestNewServerAdmissionDefaults(t *testing.T) {
+	server, err := NewServer(ServerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server.config.HandlerQueue != 16 {
+		t.Fatalf("HandlerQueue = %d", server.config.HandlerQueue)
+	}
+	if server.config.MaxConcurrentHandshakes != 64 {
+		t.Fatalf("MaxConcurrentHandshakes = %d", server.config.MaxConcurrentHandshakes)
+	}
+	if server.config.MaxActiveConnections != 1024 {
+		t.Fatalf("MaxActiveConnections = %d", server.config.MaxActiveConnections)
+	}
+}
+
+func TestNewServerRejectsNegativeAdmissionLimits(t *testing.T) {
+	tests := []ServerConfig{
+		{MaxConcurrentHandshakes: -1},
+		{MaxActiveConnections: -1},
+	}
+	for _, config := range tests {
+		if _, err := NewServer(config); err == nil {
+			t.Fatalf("expected error for config %#v", config)
+		}
+	}
+}
+
+func TestServerHandshakeAdmissionSaturationAndRelease(t *testing.T) {
+	server, err := NewServer(ServerConfig{MaxConcurrentHandshakes: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !server.tryAcquire(server.handshakes) {
+		t.Fatal("failed to acquire first handshake slot")
+	}
+	if server.tryAcquire(server.handshakes) {
+		t.Fatal("acquired saturated handshake slot")
+	}
+	server.release(server.handshakes)
+	if !server.tryAcquire(server.handshakes) {
+		t.Fatal("handshake slot was not released")
+	}
+	server.release(server.handshakes)
+}
+
+func TestServerConnectionAdmissionSaturationAndRelease(t *testing.T) {
+	server, err := NewServer(ServerConfig{MaxActiveConnections: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !server.tryAcquire(server.connSlots) {
+		t.Fatal("failed to acquire first connection slot")
+	}
+	if server.tryAcquire(server.connSlots) {
+		t.Fatal("acquired saturated connection slot")
+	}
+	server.release(server.connSlots)
+	if !server.tryAcquire(server.connSlots) {
+		t.Fatal("connection slot was not released")
+	}
+	server.release(server.connSlots)
+}
+
+func TestServerReleasesHandshakeSlotAfterFailure(t *testing.T) {
+	server, err := NewServer(ServerConfig{MaxConcurrentHandshakes: 1, HandshakeTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverConn, clientConn := net.Pipe()
+	if !server.tryAcquire(server.handshakes) || !server.registerHandshake(serverConn) {
+		t.Fatal("failed to admit handshake")
+	}
+	done := make(chan struct{})
+	go func() {
+		server.handleConn(serverConn)
+		close(done)
+	}()
+	_ = clientConn.Close()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("failed handshake did not finish")
+	}
+	if !server.tryAcquire(server.handshakes) {
+		t.Fatal("failed handshake did not release slot")
+	}
+	server.release(server.handshakes)
+}
+
+func TestServerReleasesConnectionSlotAfterClose(t *testing.T) {
+	server, err := NewServer(ServerConfig{MaxActiveConnections: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !server.tryAcquire(server.connSlots) {
+		t.Fatal("failed to acquire connection slot")
+	}
+	server.release(server.connSlots)
+	if !server.tryAcquire(server.connSlots) {
+		t.Fatal("closed connection did not release slot")
+	}
+	server.release(server.connSlots)
+}
+
+func TestServerCloseInterruptsStalledHandshake(t *testing.T) {
+	server, err := NewServer(ServerConfig{HandshakeTimeout: 30 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- server.Serve(listener) }()
+	client, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		server.mu.Lock()
+		tracked := len(server.handshakeConns)
+		server.mu.Unlock()
+		if tracked == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("handshake was not tracked")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- server.Close() }()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close waited for HandshakeTimeout")
+	}
+	select {
+	case err := <-serveDone:
+		if !errors.Is(err, ErrServerClosed) {
+			t.Fatalf("Serve error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Serve did not stop")
+	}
+}
+
+func TestServerCloseIsIdempotent(t *testing.T) {
+	server, err := NewServer(ServerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNewServerRejectsNonMVPCiphers(t *testing.T) {
+	for _, suite := range []CipherSuite{CipherAES256GCM, 99} {
+		if _, err := NewServer(ServerConfig{CipherSuite: suite}); !errors.Is(err, ErrUnsupportedCipher) {
+			t.Fatalf("suite %d error = %v", suite, err)
+		}
+	}
+}
+
+func TestValidateHandshakeFrame(t *testing.T) {
+	valid, err := NewFrame(MessageTypeHandshakeInit, [16]byte{}, 0, make([]byte, HandshakeInitFixedSize), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		mutate func(*Frame)
+	}{
+		{"message type", func(f *Frame) { f.Header.MessageType = MessageTypeHandshakeResponse }},
+		{"session ID", func(f *Frame) { f.Header.SessionID[0] = 1 }},
+		{"sequence", func(f *Frame) { f.Header.Sequence = 1 }},
+		{"reserved flags", func(f *Frame) { f.Header.Flags = FlagObfuscated }},
+		{"padding flag mismatch", func(f *Frame) { f.Header.Flags = FlagPadding }},
+		{"payload length mismatch", func(f *Frame) { f.Header.PayloadLength++ }},
+	}
+	if err := validateHandshakeFrame(valid, MessageTypeHandshakeInit); err != nil {
+		t.Fatalf("valid frame rejected: %v", err)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			frame := valid
+			tt.mutate(&frame)
+			if err := validateHandshakeFrame(frame, MessageTypeHandshakeInit); !errors.Is(err, ErrHandshakeFailed) {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
 }
 
 func TestServerDisallowedClient(t *testing.T) {
