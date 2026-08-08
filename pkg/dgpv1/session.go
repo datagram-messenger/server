@@ -1,11 +1,14 @@
 package dgpv1
 
 import (
+	"crypto/hmac"
 	"encoding"
 	"errors"
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 var (
@@ -30,15 +33,31 @@ func (r HandshakeResult) Secrets() HandshakeSecrets {
 // Session owns directional codecs, sequence allocation, and receive replay state.
 type Session struct {
 	sessionID [16]byte
-	send      *Codec
-	receive   *Codec
+	suite     CipherSuite
 
-	sendMu       sync.Mutex
-	nextSequence uint64
-	closed       bool
+	sendMu          sync.Mutex
+	send            *Codec
+	sendKey         [KeySize]byte
+	sendEpoch       uint32
+	nextSequence    uint64
+	sentInEpoch     uint64
+	epochStarted    time.Time
+	rekeyFrameLimit uint64
+	rekeyInterval   time.Duration
+	now             func() time.Time
+	closed          bool
 
-	receiveMu sync.Mutex
-	replay    ReplayWindow
+	receiveMu       sync.Mutex
+	receive         *Codec
+	receiveKey      [KeySize]byte
+	receiveEpoch    uint32
+	replay          ReplayWindow
+	previousReceive *Codec
+	previousReplay  ReplayWindow
+	graceRemaining  uint64
+	graceUntil      time.Time
+	graceFrames     uint64
+	gracePeriod     time.Duration
 }
 
 // NewSession opens a session from role-oriented handshake secrets.
@@ -54,7 +73,24 @@ func NewSession(suite CipherSuite, secrets HandshakeSecrets) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Session{sessionID: secrets.SessionID, send: send, receive: receive, nextSequence: 1}, nil
+	now := time.Now
+	return &Session{
+		sessionID:       secrets.SessionID,
+		suite:           suite,
+		send:            send,
+		sendKey:         secrets.SendKey,
+		sendEpoch:       1,
+		nextSequence:    1,
+		epochStarted:    now(),
+		rekeyFrameLimit: DefaultRekeyFrameLimit,
+		rekeyInterval:   DefaultRekeyInterval,
+		now:             now,
+		receive:         receive,
+		receiveKey:      secrets.ReceiveKey,
+		receiveEpoch:    1,
+		graceFrames:     DefaultRekeyGraceFrames,
+		gracePeriod:     DefaultRekeyGracePeriod,
+	}, nil
 }
 
 // NewSessionFromHandshake opens a session from a completed handshake result.
@@ -115,11 +151,19 @@ func (s *Session) SendPayload(messageType MessageType, plaintext []byte, padLeng
 		return Frame{}, ErrSessionClosed
 	}
 
+	observedEpoch := atomic.LoadUint32(&s.sendEpoch)
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
 	if s.closed {
 		return Frame{}, ErrSessionClosed
 	}
+	if messageType != MessageTypeRekeyInit && observedEpoch == s.sendEpoch && s.rekeyDueLocked() {
+		return s.startRekeyLocked(padLength)
+	}
+	return s.encryptLocked(messageType, plaintext, padLength)
+}
+
+func (s *Session) encryptLocked(messageType MessageType, plaintext []byte, padLength uint8) (Frame, error) {
 	if s.nextSequence == 0 {
 		return Frame{}, ErrSequenceExhausted
 	}
@@ -133,6 +177,39 @@ func (s *Session) SendPayload(messageType MessageType, plaintext []byte, padLeng
 	} else {
 		s.nextSequence++
 	}
+	s.sentInEpoch++
+	return frame, nil
+}
+
+func (s *Session) rekeyDueLocked() bool {
+	return (s.rekeyFrameLimit != 0 && s.sentInEpoch >= s.rekeyFrameLimit) ||
+		(s.rekeyInterval > 0 && !s.now().Before(s.epochStarted.Add(s.rekeyInterval)))
+}
+
+func (s *Session) startRekeyLocked(padLength uint8) (Frame, error) {
+	if s.sendEpoch == math.MaxUint32 {
+		return Frame{}, ErrEpochExhausted
+	}
+	nextEpoch := s.sendEpoch + 1
+	confirm, err := (&RekeyState{Epoch: s.sendEpoch}).ComputeKeyConfirm(s.sendKey[:], nextEpoch)
+	if err != nil {
+		return Frame{}, err
+	}
+	payload, err := (RekeyInit{Epoch: nextEpoch, KeyConfirm: confirm}).MarshalBinary()
+	if err != nil {
+		return Frame{}, err
+	}
+	frame, err := s.encryptLocked(MessageTypeRekeyInit, payload, padLength)
+	if err != nil {
+		return Frame{}, err
+	}
+	nextKey := deriveNextTrafficKey(s.sendKey)
+	nextCodec, err := NewCodec(s.suite, nextKey[:])
+	if err != nil {
+		return Frame{}, err
+	}
+	s.sendKey, s.send, s.sendEpoch = nextKey, nextCodec, nextEpoch
+	s.nextSequence, s.sentInEpoch, s.epochStarted = 1, 0, s.now()
 	return frame, nil
 }
 
@@ -169,18 +246,107 @@ func (s *Session) ReceivePayload(frame Frame) ([]byte, error) {
 	if s.closed {
 		return nil, ErrSessionClosed
 	}
-	token, err := s.replay.Check(frame.Header.Sequence)
+	s.expireGraceLocked()
+	plaintext, current, err := s.decryptEpochLocked(frame)
 	if err != nil {
 		return nil, err
 	}
-	plaintext, err := s.receive.Decrypt(frame)
-	if err != nil {
-		return nil, err
+	if !current && frame.Header.MessageType == MessageTypeRekeyInit {
+		return nil, fmt.Errorf("%w: rekey from previous epoch", ErrInvalidEpoch)
 	}
-	if err := s.replay.Commit(token); err != nil {
-		return nil, err
+	if current && frame.Header.MessageType == MessageTypeRekeyInit {
+		var init RekeyInit
+		if err := init.UnmarshalBinary(plaintext); err != nil {
+			return nil, err
+		}
+		if err := s.acceptRekeyLocked(init); err != nil {
+			return nil, err
+		}
+	} else if current && s.previousReceive != nil {
+		if s.graceRemaining > 0 {
+			s.graceRemaining--
+		}
+		s.expireGraceLocked()
 	}
 	return plaintext, nil
+}
+
+func (s *Session) decryptEpochLocked(frame Frame) ([]byte, bool, error) {
+	currentToken, currentCheck := s.replay.Check(frame.Header.Sequence)
+	if currentCheck == nil {
+		plaintext, err := s.receive.Decrypt(frame)
+		if err == nil {
+			if err := s.replay.Commit(currentToken); err != nil {
+				return nil, true, err
+			}
+			return plaintext, true, nil
+		}
+		if !errors.Is(err, ErrAuthentication) {
+			return nil, true, err
+		}
+	}
+	if s.previousReceive != nil {
+		previousToken, previousCheck := s.previousReplay.Check(frame.Header.Sequence)
+		if previousCheck == nil {
+			plaintext, err := s.previousReceive.Decrypt(frame)
+			if err == nil {
+				if err := s.previousReplay.Commit(previousToken); err != nil {
+					return nil, false, err
+				}
+				return plaintext, false, nil
+			}
+			if !errors.Is(err, ErrAuthentication) {
+				return nil, false, err
+			}
+		}
+		if currentCheck != nil && previousCheck != nil {
+			return nil, true, currentCheck
+		}
+	}
+	if currentCheck != nil {
+		return nil, true, currentCheck
+	}
+	return nil, true, ErrAuthentication
+}
+
+func (s *Session) acceptRekeyLocked(init RekeyInit) error {
+	if s.receiveEpoch == math.MaxUint32 {
+		return ErrEpochExhausted
+	}
+	if init.Epoch != s.receiveEpoch+1 {
+		return fmt.Errorf("%w: got %d, want %d", ErrInvalidEpoch, init.Epoch, s.receiveEpoch+1)
+	}
+	expected, err := (&RekeyState{Epoch: s.receiveEpoch}).ComputeKeyConfirm(s.receiveKey[:], init.Epoch)
+	if err != nil {
+		return err
+	}
+	if !hmac.Equal(expected[:], init.KeyConfirm[:]) {
+		return ErrKeyConfirmFailed
+	}
+	nextKey := deriveNextTrafficKey(s.receiveKey)
+	nextCodec, err := NewCodec(s.suite, nextKey[:])
+	if err != nil {
+		return err
+	}
+	s.previousReceive, s.previousReplay = s.receive, s.replay
+	s.receive, s.receiveKey, s.receiveEpoch = nextCodec, nextKey, init.Epoch
+	s.replay = ReplayWindow{}
+	s.graceRemaining = s.graceFrames
+	s.graceUntil = s.now().Add(s.gracePeriod)
+	s.expireGraceLocked()
+	return nil
+}
+
+func (s *Session) expireGraceLocked() {
+	if s.previousReceive == nil {
+		return
+	}
+	if s.graceRemaining == 0 || s.gracePeriod <= 0 || !s.now().Before(s.graceUntil) {
+		s.previousReceive = nil
+		s.previousReplay = ReplayWindow{}
+		s.graceRemaining = 0
+		s.graceUntil = time.Time{}
+	}
 }
 
 func validSessionMessageType(messageType MessageType) bool {
