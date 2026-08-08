@@ -310,6 +310,9 @@ func (c *Connection) writeMessage(item queuedMessage) error {
 		if frame.Header.MessageType != MessageTypeRekeyInit {
 			return nil
 		}
+		if err := c.session.MarkRekeySent(frame); err != nil {
+			return err
+		}
 	}
 }
 
@@ -378,30 +381,24 @@ func (c *Connection) handlerLoop() {
 	defer c.wg.Done()
 	for {
 		select {
-		case message := <-c.handlerQueue:
-			if err := c.callHandler(message); err != nil {
-				c.shutdown(err)
-				return
-			}
+		case <-c.ctx.Done():
+			return
 		default:
 		}
-
 		select {
+		case <-c.ctx.Done():
+			return
 		case message := <-c.handlerQueue:
+			// Cancellation may race with the receive. Recheck before starting
+			// user code; queued callbacks are never begun after shutdown.
+			select {
+			case <-c.ctx.Done():
+				return
+			default:
+			}
 			if err := c.callHandler(message); err != nil {
 				c.shutdown(err)
 				return
-			}
-		case <-c.ctx.Done():
-			for {
-				select {
-				case message := <-c.handlerQueue:
-					if err := c.callHandler(message); err != nil {
-						return
-					}
-				default:
-					return
-				}
 			}
 		}
 	}

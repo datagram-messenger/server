@@ -198,6 +198,9 @@ func TestHeaderUnmarshalBinaryIgnoresReservedReceiveFields(t *testing.T) {
 	if got.Flags != Flags(0x80) {
 		t.Fatalf("Flags = %#x, want %#x", got.Flags, Flags(0x80))
 	}
+	if got.Reserved != ([4]byte{0xa7, 0xb7, 0xb8, 0xb9}) {
+		t.Fatalf("Reserved = %x", got.Reserved)
+	}
 	if got.MessageType != MessageTypeEncryptedData || got.Sequence != 7 || got.PayloadLength != 11 {
 		t.Fatalf("decoded header = %+v", got)
 	}

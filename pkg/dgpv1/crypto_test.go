@@ -132,15 +132,31 @@ func TestCodecAcceptsZeroPaddingByte(t *testing.T) {
 	}
 }
 
-func TestCodecAADUsesCanonicalHeader(t *testing.T) {
+func TestCodecAADUsesExactReceivedReservedBytes(t *testing.T) {
 	codec, _ := NewCodec(CipherChaCha20Poly1305, make([]byte, KeySize))
-	frame, err := codec.Encrypt(MessageTypeEncryptedData, [16]byte{1}, 1, []byte("x"), 0)
+	header := NewHeader(MessageTypeEncryptedData, [16]byte{1}, 1, 1, 0)
+	header.Reserved = [4]byte{0xa7, 0xb7, 0xb8, 0xb9}
+	aad, err := header.marshalBinary(false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	frame.Header.Flags |= FlagObfuscated
-	if _, err := codec.Decrypt(frame); err != ErrAuthentication {
-		t.Fatalf("Decrypt() error = %v", err)
+	sealed := codec.aead.Seal(nil, nonce(header.Sequence), []byte("x"), aad)
+	frame := Frame{Header: header, Payload: append([]byte(nil), sealed[:1]...)}
+	copy(frame.Tag[:], sealed[1:])
+
+	plaintext, err := codec.Decrypt(frame)
+	if err != nil || !bytes.Equal(plaintext, []byte("x")) {
+		t.Fatalf("Decrypt() = %q, %v", plaintext, err)
+	}
+	for i := range frame.Header.Reserved {
+		tampered := frame
+		tampered.Header.Reserved[i] ^= 1
+		if _, err := codec.Decrypt(tampered); err != ErrAuthentication {
+			t.Fatalf("reserved byte %d tamper error = %v", i, err)
+		}
+	}
+	if _, err := frame.MarshalBinary(); !errors.Is(err, ErrReservedFlags) {
+		t.Fatalf("sender accepted nonzero reserved bytes: %v", err)
 	}
 }
 

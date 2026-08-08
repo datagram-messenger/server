@@ -65,12 +65,14 @@ const (
 	MessageTypeError            MessageType = 0x09
 )
 
-// Header is the 40-byte fixed DGPv1 frame header. Reserved wire fields are
-// omitted because senders must encode them as zero and receivers ignore them.
+// Header is the 40-byte fixed DGPv1 frame header. Reserved preserves the
+// received wire octets at offsets 7 and 37..39 so AEAD authenticates the exact
+// header. Senders must leave Reserved zero.
 type Header struct {
 	Version       uint8
 	Flags         Flags
 	MessageType   MessageType
+	Reserved      [4]byte
 	SessionID     [16]byte
 	Sequence      uint64
 	PayloadLength uint32
@@ -131,6 +133,9 @@ func (h Header) Validate() error {
 	if h.Flags&^mvpSenderFlags != 0 {
 		return fmt.Errorf("%w: 0x%02x", ErrReservedFlags, uint8(h.Flags&^mvpSenderFlags))
 	}
+	if h.Reserved != ([4]byte{}) {
+		return fmt.Errorf("%w: reserved header bytes are nonzero", ErrReservedFlags)
+	}
 	return nil
 }
 
@@ -154,10 +159,12 @@ func (h Header) marshalBinary(validateSend bool) ([]byte, error) {
 	buf[4] = h.Version
 	buf[5] = byte(h.Flags)
 	buf[6] = byte(h.MessageType)
+	buf[7] = h.Reserved[0]
 	copy(buf[8:24], h.SessionID[:])
 	binary.LittleEndian.PutUint64(buf[24:32], h.Sequence)
 	binary.LittleEndian.PutUint32(buf[32:36], h.PayloadLength)
 	buf[36] = h.PadLength
+	copy(buf[37:40], h.Reserved[1:])
 	return buf, nil
 }
 
@@ -179,10 +186,12 @@ func (h *Header) UnmarshalBinary(data []byte) error {
 
 	var sessionID [16]byte
 	copy(sessionID[:], data[8:24])
+	reserved := [4]byte{data[7], data[37], data[38], data[39]}
 	decoded := Header{
 		Version:       data[4],
 		Flags:         Flags(data[5]),
 		MessageType:   MessageType(data[6]),
+		Reserved:      reserved,
 		SessionID:     sessionID,
 		Sequence:      binary.LittleEndian.Uint64(data[24:32]),
 		PayloadLength: binary.LittleEndian.Uint32(data[32:36]),

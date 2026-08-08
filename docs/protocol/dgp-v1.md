@@ -134,7 +134,7 @@ there).
  0               1               2               3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                     Magic (0x44475031 "DGP1")                 |
+|                  Magic octets 44 47 50 31 ("DGP1")             |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |    Version    |     Flags     |  Msg Type     |   Reserved    |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -164,16 +164,16 @@ there).
 
 | Field            | Offset | Size (bytes) | Type      | Description |
 |------------------|--------|--------------|-----------|--------------|
-| Magic            | 0      | 4            | `uint32`  | Fixed constant `0x44475031` (ASCII "DGP1"). |
+| Magic            | 0      | 4            | `bytes4`  | Fixed octets `44 47 50 31` (ASCII "DGP1"). If interpreted as a little-endian `uint32`, the value is `0x31504744`; the octets are normative. |
 | Version          | 4      | 1            | `uint8`   | Protocol version. `0x01` for this specification. |
 | Flags            | 5      | 1            | `uint8`   | Bit 1: Padding Present. Bits 0 and 2 are post-MVP reservations. Other bits are reserved. MVP senders MUST leave all reserved bits zero; receivers ignore unknown bits. |
 | Msg Type         | 6      | 1            | `uint8`   | See §5 Message Type registry. |
-| Reserved         | 7      | 1            | `uint8`   | MUST be zero on send, ignored on receive. Reserved for alignment / future flags. |
+| Reserved         | 7      | 1            | `uint8`   | MUST be zero on send and preserved on receive as part of the exact AEAD associated data. Reserved for alignment / future flags. |
 | Session ID       | 8      | 16           | `bytes16` | Session identifier derived from the completed Noise transcript and assigned only after handshake completion. |
 | Sequence Number  | 24     | 8            | `uint64`  | Monotonically increasing per sending direction. Used as AEAD nonce material (§4) and for replay-window validation (§4.4). MUST NOT repeat within a session's cipher key epoch. |
 | Payload Length   | 32     | 4            | `uint32`  | Length of the encrypted payload (ciphertext), **excluding** the AEAD Tag and Padding. |
 | Pad Length       | 36     | 1            | `uint8`   | Length of trailing random padding, 0–255 bytes. |
-| Reserved         | 37     | 3            | —         | Alignment filler, MUST be zero. |
+| Reserved         | 37     | 3            | —         | MUST be zero on send and preserved on receive as part of the exact AEAD associated data. |
 | Payload          | 40     | variable     | `bytes`   | AEAD ciphertext of the L4 message, or a Noise handshake message for Msg Type `0x01`/`0x02`. |
 | AEAD Tag         | 40+PL  | 0 or 16      | `bytes16` | Absent on handshake frames (`0x01` and `0x02`); otherwise the 128-bit Poly1305 or GCM authentication tag. Noise provides handshake-message authentication internally. |
 | Padding          | ...    | Pad Length   | `bytes`   | Cryptographically random bytes, not covered by the AEAD tag's confidentiality guarantee for content but MAY be included in the AEAD associated data for integrity of the length field (implementation choice, RECOMMENDED). |
@@ -254,14 +254,12 @@ The client and server MUST NOT enter the encrypted-session state or use the
 Session ID until message 3 has been produced or authenticated, respectively.
 At that point both parties compute the full Diffie-Hellman transcript and
 derive the session key schedule via the Noise `Split()` convention. The two
-independent, directional 256-bit traffic keys are the Noise split outputs:
-
-```
-(k_send, k_recv) = HKDF-SHA256-Expand(ck, "dgpv1 traffic keys", 64)
-```
-
-`k_send` on the client equals `k_recv` on the server and vice versa. Each
-subsequent MVP data frame MUST be encrypted with **ChaCha20-Poly1305**,
+independent, directional 256-bit traffic keys are exactly the standard Noise
+`Split()` outputs; DGPv1 MUST NOT apply an additional HKDF or label. In the
+canonical Noise order `(k1, k2) = Split()`, `k1` protects initiator-to-responder
+traffic and `k2` protects responder-to-initiator traffic. The client therefore
+uses `k1` to send and `k2` to receive; the server uses `k2` to send and `k1` to
+receive. Each subsequent MVP data frame MUST be encrypted with **ChaCha20-Poly1305**,
 using a 96-bit nonce constructed by
 zero-extending the 64-bit `Sequence Number` field from the L1 header.
 

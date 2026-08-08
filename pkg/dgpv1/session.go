@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -52,8 +50,7 @@ type Session struct {
 	rekeyFrameLimit uint64
 	rekeyInterval   time.Duration
 	now             func() time.Time
-	activeSends     int64
-	rekeySuppressed atomic.Uint32
+	pendingRekey    *pendingSendRekey
 	closed          bool
 
 	receiveMu       sync.Mutex
@@ -141,17 +138,27 @@ func (s *Session) Closed() bool {
 	return s.closed
 }
 
+// ErrRekeyPending indicates that Send is blocked until the caller confirms
+// that the previously returned RekeyInit was transmitted.
+var ErrRekeyPending = errors.New("dgpv1: rekey frame has not been marked sent")
+
+type pendingSendRekey struct {
+	frame Frame
+	key   [KeySize]byte
+	codec *Codec
+	epoch uint32
+}
+
 // Send marshals and encrypts a strict-MVP typed message. It is safe for
 // concurrent use. At a rekey boundary it returns an internally generated
-// RekeyInit instead; a direct caller must transmit that frame, then retry the
-// original message. Connection performs this retry automatically.
+// RekeyInit. A direct caller MUST transmit it, call MarkRekeySent, and retry the
+// original message. Until then all sends fail with ErrRekeyPending, so no
+// new-epoch application frame can overtake RekeyInit. Connection does this
+// automatically.
 func (s *Session) Send(message any, padLength uint8) (Frame, error) {
 	if s == nil {
 		return Frame{}, ErrSessionClosed
 	}
-	atomic.AddInt64(&s.activeSends, 1)
-	defer s.finishSend()
-	observedEpoch := atomic.LoadUint32(&s.sendEpoch)
 	messageType, marshaler, err := outboundMessage(message)
 	if err != nil {
 		return Frame{}, err
@@ -160,13 +167,12 @@ func (s *Session) Send(message any, padLength uint8) (Frame, error) {
 	if err != nil {
 		return Frame{}, err
 	}
-	return s.sendPayload(messageType, plaintext, padLength, observedEpoch)
+	return s.sendPayload(messageType, plaintext, padLength)
 }
 
 // SendPayload encrypts an already encoded payload of an MVP encrypted message
-// type. RekeyInit, message type 0x07, and handshake types are rejected. As with
-// Send, a direct caller must retry the payload after transmitting any automatic
-// RekeyInit returned at a boundary.
+// type. RekeyInit, message type 0x07, and handshake types are rejected. It uses
+// the same MarkRekeySent protocol as Send.
 func (s *Session) SendPayload(messageType MessageType, plaintext []byte, padLength uint8) (Frame, error) {
 	if messageType == MessageTypeResumptionTicket {
 		return Frame{}, fmt.Errorf("%w: 0x%02x is post-MVP", ErrMessageType, messageType)
@@ -177,12 +183,10 @@ func (s *Session) SendPayload(messageType MessageType, plaintext []byte, padLeng
 	if s == nil {
 		return Frame{}, ErrSessionClosed
 	}
-	atomic.AddInt64(&s.activeSends, 1)
-	defer s.finishSend()
-	return s.sendPayload(messageType, plaintext, padLength, atomic.LoadUint32(&s.sendEpoch))
+	return s.sendPayload(messageType, plaintext, padLength)
 }
 
-func (s *Session) sendPayload(messageType MessageType, plaintext []byte, padLength uint8, observedEpoch uint32) (Frame, error) {
+func (s *Session) sendPayload(messageType MessageType, plaintext []byte, padLength uint8) (Frame, error) {
 	if !validSessionMessageType(messageType) {
 		return Frame{}, fmt.Errorf("%w: 0x%02x", ErrMessageType, messageType)
 	}
@@ -192,31 +196,40 @@ func (s *Session) sendPayload(messageType MessageType, plaintext []byte, padLeng
 	if s.closed {
 		return Frame{}, ErrSessionClosed
 	}
-	if messageType != MessageTypeRekeyInit && s.rekeySuppressed.Load() == 0 &&
-		observedEpoch == atomic.LoadUint32(&s.sendEpoch) && s.rekeyDueLocked() {
-		if atomic.LoadInt64(&s.activeSends) == 1 {
-			time.Sleep(time.Millisecond)
-		}
-		frame, err := s.startRekeyLocked(padLength)
-		if err == nil && atomic.LoadInt64(&s.activeSends) > 1 {
-			s.rekeySuppressed.Store(1)
-		}
-		return frame, err
+	if s.pendingRekey != nil {
+		return Frame{}, ErrRekeyPending
+	}
+	if s.rekeyDueLocked() {
+		return s.startRekeyLocked(padLength)
 	}
 	return s.encryptLocked(messageType, plaintext, padLength)
 }
 
-func (s *Session) finishSend() {
-	if atomic.AddInt64(&s.activeSends, -1) != 0 {
-		return
+// MarkRekeySent commits the pending send-key transition after frame has been
+// successfully transmitted. It rejects any frame other than the exact pending
+// RekeyInit and is safe for concurrent use.
+func (s *Session) MarkRekeySent(frame Frame) error {
+	if s == nil {
+		return ErrSessionClosed
 	}
-	for range 32 {
-		runtime.Gosched()
-		if atomic.LoadInt64(&s.activeSends) != 0 {
-			return
-		}
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	if s.closed {
+		return ErrSessionClosed
 	}
-	s.rekeySuppressed.Store(0)
+	if s.pendingRekey == nil || !sameRekeyFrame(s.pendingRekey.frame, frame) {
+		return ErrRekeyPending
+	}
+	pending := s.pendingRekey
+	s.sendKey, s.send, s.sendEpoch = pending.key, pending.codec, pending.epoch
+	s.nextSequence, s.sentInEpoch, s.epochStarted = 1, 0, s.now()
+	s.pendingRekey = nil
+	return nil
+}
+
+func sameRekeyFrame(a, b Frame) bool {
+	return a.Header == b.Header && a.Tag == b.Tag &&
+		string(a.Payload) == string(b.Payload) && string(a.Padding) == string(b.Padding)
 }
 
 func (s *Session) encryptLocked(messageType MessageType, plaintext []byte, padLength uint8) (Frame, error) {
@@ -266,9 +279,12 @@ func (s *Session) startRekeyLocked(padLength uint8) (Frame, error) {
 	if err != nil {
 		return Frame{}, err
 	}
-	s.sendKey, s.send = nextKey, nextCodec
-	atomic.StoreUint32(&s.sendEpoch, nextEpoch)
-	s.nextSequence, s.sentInEpoch, s.epochStarted = 1, 0, s.now()
+	s.pendingRekey = &pendingSendRekey{
+		frame: frame,
+		key:   nextKey,
+		codec: nextCodec,
+		epoch: nextEpoch,
+	}
 	return frame, nil
 }
 

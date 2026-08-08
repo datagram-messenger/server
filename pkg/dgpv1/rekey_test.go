@@ -53,6 +53,9 @@ func TestSessionRekeyTriggers(t *testing.T) {
 			if frame.Header.MessageType != MessageTypeRekeyInit {
 				t.Fatalf("type = 0x%02x", frame.Header.MessageType)
 			}
+			if err := client.MarkRekeySent(frame); err != nil {
+				t.Fatal(err)
+			}
 			receiveRekey(t, server, frame)
 			if client.sendEpoch != 2 || server.receiveEpoch != 2 || client.nextSequence != 1 {
 				t.Fatalf("epochs/sequences = %d/%d/%d", client.sendEpoch, server.receiveEpoch, client.nextSequence)
@@ -79,6 +82,9 @@ func TestSessionRekeyBothDirections(t *testing.T) {
 		frame, err := pair[0].startRekeyLocked(0)
 		pair[0].sendMu.Unlock()
 		if err != nil {
+			t.Fatal(err)
+		}
+		if err := pair[0].MarkRekeySent(frame); err != nil {
 			t.Fatal(err)
 		}
 		receiveRekey(t, pair[1], frame)
@@ -116,6 +122,9 @@ func TestSessionRekeyGraceAcceptanceAndExpiry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if err := client.MarkRekeySent(rekey); err != nil {
+				t.Fatal(err)
+			}
 			receiveRekey(t, server, rekey)
 			tc.expire(server, &now)
 			_, err = server.Receive(delayed)
@@ -135,6 +144,9 @@ func TestSessionRejectsDuplicateRollbackFutureAndBadConfirm(t *testing.T) {
 	rekey, err := client.startRekeyLocked(0)
 	client.sendMu.Unlock()
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.MarkRekeySent(rekey); err != nil {
 		t.Fatal(err)
 	}
 	receiveRekey(t, server, rekey)
@@ -287,42 +299,56 @@ func TestSessionConcurrentRekeySafe(t *testing.T) {
 	}
 
 	const count = 64
-	frames := make(chan Frame, count)
+	type result struct {
+		frame Frame
+		err   error
+	}
+	results := make(chan result, count)
+	start := make(chan struct{})
 	var wg sync.WaitGroup
 	for range count {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			<-start
 			frame, err := client.Send(PingPong{Nonce: 1}, 0)
-			if err != nil {
-				t.Errorf("send: %v", err)
-				return
-			}
-			frames <- frame
+			results <- result{frame: frame, err: err}
 		}()
 	}
+	close(start)
 	wg.Wait()
-	close(frames)
+	close(results)
 
 	var rekey Frame
-	data := make([]Frame, 0, count-1)
-	for frame := range frames {
-		if frame.Header.MessageType == MessageTypeRekeyInit {
+	pending := 0
+	for result := range results {
+		switch {
+		case result.err == nil && result.frame.Header.MessageType == MessageTypeRekeyInit:
 			if rekey.Header.MessageType != 0 {
 				t.Fatal("multiple rekeys at one trigger boundary")
 			}
-			rekey = frame
-		} else {
-			data = append(data, frame)
+			rekey = result.frame
+		case errors.Is(result.err, ErrRekeyPending):
+			pending++
+		default:
+			t.Fatalf("unexpected concurrent send result: type=%#x error=%v", result.frame.Header.MessageType, result.err)
 		}
 	}
-	if rekey.Header.MessageType == 0 {
-		t.Fatal("missing rekey")
+	if rekey.Header.MessageType == 0 || pending != count-1 {
+		t.Fatalf("rekey/pending = %#x/%d, want %#x/%d", rekey.Header.MessageType, pending, MessageTypeRekeyInit, count-1)
+	}
+	if err := client.MarkRekeySent(rekey); err != nil {
+		t.Fatal(err)
 	}
 	receiveRekey(t, server, rekey)
-	for _, frame := range data {
-		if _, err := server.Receive(frame); err != nil {
-			t.Fatalf("receive: %v", err)
-		}
+	data, err := client.Send(PingPong{Nonce: 1}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.Header.Sequence != 1 {
+		t.Fatalf("new epoch sequence = %d, want 1", data.Header.Sequence)
+	}
+	if _, err := server.Receive(data); err != nil {
+		t.Fatal(err)
 	}
 }

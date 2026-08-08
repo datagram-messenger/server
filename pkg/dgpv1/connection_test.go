@@ -45,6 +45,9 @@ func writeConnectionMessage(t *testing.T, transport *TCPTransport, session *Sess
 		if frame.Header.MessageType != MessageTypeRekeyInit {
 			return
 		}
+		if err := session.MarkRekeySent(frame); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -379,15 +382,18 @@ func TestConnectionSlowHandlerPreservesOrderAndBoundsQueue(t *testing.T) {
 	if !errors.Is(connection.Err(), ErrHandlerQueueFull) {
 		t.Fatalf("error = %v, want %v", connection.Err(), ErrHandlerQueueFull)
 	}
-	for i, want := range []uint16{1, 2, 3} {
-		select {
-		case got := <-processed:
-			if got != want {
-				t.Fatalf("processed[%d] = %d, want %d", i, got, want)
-			}
-		case <-time.After(connectionTestTimeout):
-			t.Fatalf("missing processed message %d", want)
+	select {
+	case got := <-processed:
+		if got != 1 {
+			t.Fatalf("processed = %d, want only in-flight callback 1", got)
 		}
+	case <-time.After(connectionTestTimeout):
+		t.Fatal("in-flight callback did not finish")
+	}
+	select {
+	case got := <-processed:
+		t.Fatalf("queued callback %d started after cancellation", got)
+	default:
 	}
 }
 

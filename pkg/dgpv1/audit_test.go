@@ -47,6 +47,9 @@ func TestSessionPreviousEpochGraceFrameBoundary(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if err := sender.MarkRekeySent(rekey); err != nil {
+				t.Fatal(err)
+			}
 			receiveRekey(t, receiver, rekey)
 
 			for i := 0; i < tc.currentFrames; i++ {
