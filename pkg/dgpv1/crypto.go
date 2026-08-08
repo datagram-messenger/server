@@ -1,7 +1,6 @@
 package dgpv1
 
 import (
-	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/binary"
@@ -46,28 +45,16 @@ type Codec struct {
 	aead cipher.AEAD
 }
 
-// NewCodec constructs a data-frame codec for a negotiated cipher suite.
+// NewCodec constructs the ChaCha20-Poly1305 data-frame codec required by
+// the DGPv1 MVP profile. Other suites are rejected without negotiation.
 func NewCodec(suite CipherSuite, key []byte) (*Codec, error) {
+	if suite != CipherChaCha20Poly1305 {
+		return nil, fmt.Errorf("%w: %d", ErrUnsupportedCipher, suite)
+	}
 	if len(key) != KeySize {
 		return nil, fmt.Errorf("%w: got %d, want %d", ErrInvalidKeySize, len(key), KeySize)
 	}
-
-	var (
-		aead cipher.AEAD
-		err  error
-	)
-	switch suite {
-	case CipherChaCha20Poly1305:
-		aead, err = chacha20poly1305.New(key)
-	case CipherAES256GCM:
-		var block cipher.Block
-		block, err = aes.NewCipher(key)
-		if err == nil {
-			aead, err = cipher.NewGCM(block)
-		}
-	default:
-		return nil, fmt.Errorf("%w: %d", ErrUnsupportedCipher, suite)
-	}
+	aead, err := chacha20poly1305.New(key)
 	if err != nil {
 		return nil, err
 	}

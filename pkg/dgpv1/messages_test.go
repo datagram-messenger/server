@@ -44,7 +44,7 @@ func TestHandshakeWrappersRoundTripAndOwnership(t *testing.T) {
 	for i := range e {
 		e[i] = byte(i)
 	}
-	ik := HandshakeInit{Pattern: NoisePatternIK, ClientEphemeral: e, NoisePayload: []byte{1, 2, 3, 4}}
+	ik := HandshakeInit{Pattern: NoisePatternXX, ClientEphemeral: e}
 	wire, err := ik.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +53,7 @@ func TestHandshakeWrappersRoundTripAndOwnership(t *testing.T) {
 	if err = got.UnmarshalBinary(wire); err != nil {
 		t.Fatal(err)
 	}
-	wire[36] = 9
+	wire[4] = 9
 	if !reflect.DeepEqual(got, ik) {
 		t.Fatalf("got %#v want %#v", got, ik)
 	}
@@ -69,6 +69,18 @@ func TestHandshakeWrappersRoundTripAndOwnership(t *testing.T) {
 	wire[32] = 9
 	if !reflect.DeepEqual(gotResp, resp) {
 		t.Fatalf("got %#v want %#v", gotResp, resp)
+	}
+}
+
+func TestHandshakeInitRejectsIK(t *testing.T) {
+	if _, err := (HandshakeInit{Pattern: NoisePatternIK}).MarshalBinary(); !errors.Is(err, ErrInvalidNoisePattern) {
+		t.Fatalf("marshal IK: %v", err)
+	}
+	wire := make([]byte, HandshakeInitFixedSize)
+	wire[0] = byte(NoisePatternIK)
+	var init HandshakeInit
+	if err := init.UnmarshalBinary(wire); !errors.Is(err, ErrInvalidNoisePattern) {
+		t.Fatalf("unmarshal IK: %v", err)
 	}
 }
 
@@ -170,7 +182,7 @@ func TestMalformedMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad = make([]byte, 37)
-	bad[0] = 2
+	bad[0] = byte(NoisePatternXX)
 	if err := init.UnmarshalBinary(bad); !errors.Is(err, ErrHandshakeAlignment) {
 		t.Fatal(err)
 	}
@@ -244,14 +256,14 @@ func TestTruncationAtEveryBoundary(t *testing.T) {
 
 func TestHandshakePayloadSizeLimits(t *testing.T) {
 	oversizedInit := HandshakeInit{
-		Pattern:      NoisePatternIK,
+		Pattern:      NoisePatternXX,
 		NoisePayload: make([]byte, MaxHandshakePayloadSize-HandshakeInitFixedSize+1),
 	}
-	if _, err := oversizedInit.MarshalBinary(); !errors.Is(err, ErrMessageLength) {
+	if _, err := oversizedInit.MarshalBinary(); !errors.Is(err, ErrUnexpectedNoiseData) {
 		t.Fatalf("oversized init marshal: %v", err)
 	}
 	initWire := make([]byte, MaxHandshakePayloadSize+1)
-	initWire[0] = byte(NoisePatternIK)
+	initWire[0] = byte(NoisePatternXX)
 	var init HandshakeInit
 	if err := init.UnmarshalBinary(initWire); !errors.Is(err, ErrMessageLength) {
 		t.Fatalf("oversized init unmarshal: %v", err)

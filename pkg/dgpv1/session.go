@@ -71,6 +71,9 @@ type Session struct {
 
 // NewSession opens a session from role-oriented handshake secrets.
 func NewSession(suite CipherSuite, secrets HandshakeSecrets) (*Session, error) {
+	if suite != CipherChaCha20Poly1305 {
+		return nil, fmt.Errorf("%w: DGPv1 requires ChaCha20-Poly1305", ErrUnsupportedCipher)
+	}
 	if secrets.SessionID == ([16]byte{}) {
 		return nil, ErrInvalidSessionID
 	}
@@ -168,6 +171,8 @@ func (s *Session) SendPayload(messageType MessageType, plaintext []byte, padLeng
 	if s == nil {
 		return Frame{}, ErrSessionClosed
 	}
+	atomic.AddInt64(&s.activeSends, 1)
+	defer s.finishSend()
 	return s.sendPayload(messageType, plaintext, padLength, atomic.LoadUint32(&s.sendEpoch))
 }
 

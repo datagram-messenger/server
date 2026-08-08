@@ -65,13 +65,14 @@ var (
 )
 
 // NoisePattern identifies a Noise handshake pattern in the wire wrapper.
-// The strict MVP handshake implementation accepts only NoisePatternXX.
+// DGPv1 MVP permits only NoisePatternXX.
 type NoisePattern uint8
 
 const (
-	// NoisePatternXX identifies the Noise XX pattern used by the strict MVP.
+	// NoisePatternXX identifies the Noise XX pattern used by DGPv1 MVP.
 	NoisePatternXX NoisePattern = 1
-	// NoisePatternIK identifies the registered Noise IK pattern, which the strict-MVP Handshake does not execute.
+	// NoisePatternIK is retained for source compatibility with historical code.
+	// DGPv1 MVP serializers and parsers reject it.
 	NoisePatternIK NoisePattern = 2
 )
 
@@ -87,10 +88,10 @@ type HandshakeInit struct {
 
 // MarshalBinary encodes m as a handshake-init payload and returns owned storage.
 func (m HandshakeInit) MarshalBinary() ([]byte, error) {
-	if m.Pattern != NoisePatternXX && m.Pattern != NoisePatternIK {
-		return nil, fmt.Errorf("%w: 0x%02x", ErrInvalidNoisePattern, m.Pattern)
+	if m.Pattern != NoisePatternXX {
+		return nil, fmt.Errorf("%w: DGPv1 MVP requires Noise XX, got 0x%02x", ErrInvalidNoisePattern, m.Pattern)
 	}
-	if m.Pattern == NoisePatternXX && len(m.NoisePayload) != 0 {
+	if len(m.NoisePayload) != 0 {
 		return nil, ErrUnexpectedNoiseData
 	}
 	total := HandshakeInitFixedSize + len(m.NoisePayload)
@@ -119,13 +120,13 @@ func (m *HandshakeInit) UnmarshalBinary(data []byte) error {
 		return ErrHandshakeAlignment
 	}
 	pattern := NoisePattern(data[0])
-	if pattern != NoisePatternXX && pattern != NoisePatternIK {
-		return fmt.Errorf("%w: 0x%02x", ErrInvalidNoisePattern, pattern)
+	if pattern != NoisePatternXX {
+		return fmt.Errorf("%w: DGPv1 MVP requires Noise XX, got 0x%02x", ErrInvalidNoisePattern, pattern)
 	}
 	if data[1] != 0 || data[2] != 0 || data[3] != 0 {
 		return ErrMessageReserved
 	}
-	if pattern == NoisePatternXX && len(data) != HandshakeInitFixedSize {
+	if len(data) != HandshakeInitFixedSize {
 		return ErrUnexpectedNoiseData
 	}
 	var ephemeral [32]byte

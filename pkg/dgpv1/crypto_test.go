@@ -8,28 +8,24 @@ import (
 )
 
 func TestCodecRoundTrip(t *testing.T) {
-	for _, suite := range []CipherSuite{CipherChaCha20Poly1305, CipherAES256GCM} {
-		t.Run(string(rune('0'+suite)), func(t *testing.T) {
-			codec, err := NewCodec(suite, bytes.Repeat([]byte{0x42}, KeySize))
-			if err != nil {
-				t.Fatal(err)
-			}
-			plaintext := []byte("authenticated DGPv1 payload")
-			frame, err := codec.Encrypt(MessageTypeEncryptedData, [16]byte{1}, 0x0102030405060708, plaintext, 17)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(frame.Payload) != len(plaintext) || len(frame.Padding) != 17 {
-				t.Fatalf("body lengths = %d, %d", len(frame.Payload), len(frame.Padding))
-			}
-			got, err := codec.Decrypt(frame)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(got, plaintext) {
-				t.Fatalf("plaintext = %q, want %q", got, plaintext)
-			}
-		})
+	codec, err := NewCodec(CipherChaCha20Poly1305, bytes.Repeat([]byte{0x42}, KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plaintext := []byte("authenticated DGPv1 payload")
+	frame, err := codec.Encrypt(MessageTypeEncryptedData, [16]byte{1}, 0x0102030405060708, plaintext, 17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frame.Payload) != len(plaintext) || len(frame.Padding) != 17 {
+		t.Fatalf("body lengths = %d, %d", len(frame.Payload), len(frame.Padding))
+	}
+	got, err := codec.Decrypt(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, plaintext) {
+		t.Fatalf("plaintext = %q, want %q", got, plaintext)
 	}
 }
 
@@ -48,8 +44,10 @@ func TestNewCodecErrors(t *testing.T) {
 			t.Fatalf("key size %d error = %v", size, err)
 		}
 	}
-	if _, err := NewCodec(99, make([]byte, KeySize)); !errors.Is(err, ErrUnsupportedCipher) {
-		t.Fatalf("unsupported suite error = %v", err)
+	for _, suite := range []CipherSuite{CipherAES256GCM, 99} {
+		if _, err := NewCodec(suite, make([]byte, KeySize)); !errors.Is(err, ErrUnsupportedCipher) {
+			t.Fatalf("suite %d error = %v", suite, err)
+		}
 	}
 }
 
@@ -106,23 +104,18 @@ func TestCodecAuthenticationFailuresAreUniform(t *testing.T) {
 	}
 }
 
-func TestCodecWrongKeyAndCipherFailAuthentication(t *testing.T) {
+func TestCodecWrongKeyFailsAuthentication(t *testing.T) {
 	codec, _ := NewCodec(CipherChaCha20Poly1305, bytes.Repeat([]byte{1}, KeySize))
 	frame, err := codec.Encrypt(MessageTypeEncryptedData, [16]byte{1}, 1, []byte("secret"), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct {
-		suite CipherSuite
-		key   byte
-	}{{CipherChaCha20Poly1305, 2}, {CipherAES256GCM, 1}} {
-		other, err := NewCodec(tc.suite, bytes.Repeat([]byte{tc.key}, KeySize))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := other.Decrypt(frame); err != ErrAuthentication {
-			t.Fatalf("Decrypt() error = %v", err)
-		}
+	other, err := NewCodec(CipherChaCha20Poly1305, bytes.Repeat([]byte{2}, KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Decrypt(frame); err != ErrAuthentication {
+		t.Fatalf("Decrypt() error = %v", err)
 	}
 }
 

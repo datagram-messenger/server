@@ -229,3 +229,12 @@ func TestSessionRejectsZeroID(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestNewSessionRejectsNonMVPCiphers(t *testing.T) {
+	secrets := HandshakeSecrets{SessionID: [16]byte{1}}
+	for _, suite := range []CipherSuite{CipherAES256GCM, 99} {
+		if _, err := NewSession(suite, secrets); !errors.Is(err, ErrUnsupportedCipher) {
+			t.Fatalf("suite %d error = %v", suite, err)
+		}
+	}
+}
