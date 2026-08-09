@@ -246,11 +246,11 @@ sha256sum ./bin/api_datagram ./bin/api_bot ./bin/auth ./bin/user
 
 ## 12. Smoke test, конфигурация и secrets
 
-Использовать отдельный непроизводственный `DGP_STATIC_KEY` длиной ровно 64 hex-символа; не помещать ключ в git, логи или evidence. Smoke выполняется с Bash environment variables и проверкой graceful shutdown по `SIGTERM`:
+Использовать отдельный непроизводственный `DGP_STATIC_KEY` длиной ровно 64 hex-символа; не помещать ключ в git, логи или evidence. Сохранить его вне репозитория в файле с ограниченными правами (например, `/run/secrets/dgp_static_key`). Smoke выполняется с Bash environment variables и проверкой graceful shutdown по `SIGTERM`:
 
 ```bash
 export DGP_ADDRESS='127.0.0.1:8090'
-export DGP_STATIC_KEY='0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+export DGP_STATIC_KEY="$(tr -d '\r\n' < /run/secrets/dgp_static_key)"
 
 log_file="$(mktemp)"
 ./bin/api_datagram >"$log_file" 2>&1 &
