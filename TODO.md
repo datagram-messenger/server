@@ -350,7 +350,7 @@ Audit basis: `HEAD` `903fd10`, the current `pkg/dgpserver`, `pkg/dgpv1`, and `cm
 - [ ] Add echo, authenticated, command-router, middleware, graceful-shutdown, and migration examples.
   - [x] `cmd/api_datagram` is a tested service-migration example with echo/info handlers and graceful shutdown.
   - [x] Add standalone compiled typed-router and SDK command-router examples.
-  - [ ] Add standalone compiled allowlist-authentication, command-group, middleware, graceful-shutdown, and migration examples.
+  - [x] Add standalone compiled allowlist-authentication, command-group, middleware, and graceful-shutdown examples; `cmd/api_datagram` remains the compiled migration example.
 - [ ] Add real-TCP tests, race/stress/leak tests, fuzz registration/config boundaries, and benchmarks for dispatch overhead.
   - [x] SDK real-TCP integration covers authentication, hooks, typed dispatch/response, rejection/panic isolation, and shutdown escalation; `pkg/dgpv1` has parser fuzz targets.
   - [ ] Add automatic-rekey and all-abnormal-exit SDK flows, race/stress/leak suites, SDK registration/config fuzzing, and dispatch benchmarks.
@@ -404,7 +404,7 @@ Do **not** include in the first release:
   - [ ] Add automatic rekey and an exhaustive abnormal-exit matrix.
 - [ ] Complete exported `go doc`, ownership/concurrency text, migration guidance, and compiled examples.
   - [x] Exported SDK symbols have baseline comments and ownership intent is represented in code/tests.
-  - [ ] Reconcile docs with the implemented API and add complete compiled examples/migration guidance.
+  - [x] Add the `docs/dgpserver` developer guide, reconcile it with the implemented API, link it from package/root docs, and add compiled examples plus migration guidance.
 - [ ] Complete dependency review and SBOM; keep the first release experimental until exercised by a real service.
   - [x] `cmd/api_datagram` now exercises the SDK as the repository service migration.
   - [ ] Produce dependency-review/SBOM artifacts and explicit experimental-release evidence.
