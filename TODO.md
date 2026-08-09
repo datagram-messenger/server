@@ -307,7 +307,8 @@ Audit basis: `HEAD` `903fd10`, the current `pkg/dgpserver`, `pkg/dgpv1`, and `cm
 
 - [ ] Approve the remaining public-contract decisions and add compile-only API examples.
   - [x] Implementation has selected behavior for local write completion, context-driven serving, nil authentication, error observation, and disconnect timeout.
-  - [ ] Reconcile the frozen contract/examples with the implemented API (`RegisterTyped`, `Config.DGP`, embedded `Context`, send signatures, error names, and hook/auth types), then add compiling examples.
+  - [ ] Reconcile the frozen contract/examples with the implemented API (`Config.DGP`, embedded `Context`, send signatures, error names, and hook/auth types).
+  - [x] Add the contract-level generic `Handle` function, typed router registration methods, and compiling router/command-router examples while preserving `RegisterTyped`.
 - [x] Add a narrow completed-handshake admission value/callback exposing peer public key, session ID, and address; preserve existing `dgpv1.Server` callers.
 - [x] Add context-aware queue admission and write completion internally/compatibly to `dgpv1.Connection`; keep `Connection.Send` unchanged.
 - [x] Define and test a precedence table for simultaneous transport, handler, local close, and shutdown terminal causes.
@@ -325,7 +326,7 @@ Audit basis: `HEAD` `903fd10`, the current `pkg/dgpserver`, `pkg/dgpv1`, and `cm
   - [x] Add decoder/group coverage for command routing.
   - [x] Add explicit coverage for middleware calling `next` twice.`r`n  - [ ] Reconcile remaining API semantics in Phase A.
 
-**Acceptance:** typed DGP handlers and in-memory tests work without crypto/network, but the command-router API and compile-only examples are missing.
+**Acceptance:** typed DGP and command handlers plus in-memory tests work without crypto/network; broader public API reconciliation remains tracked in Phase A.
 
 ### Phase C — admission, hooks, and runtime lifecycle
 
@@ -348,12 +349,13 @@ Audit basis: `HEAD` `903fd10`, the current `pkg/dgpserver`, `pkg/dgpv1`, and `cm
   - [x] Application commands use the codec-neutral SDK command router; the local `AppMessageType` map was removed.
 - [ ] Add echo, authenticated, command-router, middleware, graceful-shutdown, and migration examples.
   - [x] `cmd/api_datagram` is a tested service-migration example with echo/info handlers and graceful shutdown.
-  - [ ] Add standalone compiled examples, especially allowlist authentication, SDK command groups, and middleware.
+  - [x] Add standalone compiled typed-router and SDK command-router examples.
+  - [ ] Add standalone compiled allowlist-authentication, command-group, middleware, graceful-shutdown, and migration examples.
 - [ ] Add real-TCP tests, race/stress/leak tests, fuzz registration/config boundaries, and benchmarks for dispatch overhead.
   - [x] SDK real-TCP integration covers authentication, hooks, typed dispatch/response, rejection/panic isolation, and shutdown escalation; `pkg/dgpv1` has parser fuzz targets.
   - [ ] Add automatic-rekey and all-abnormal-exit SDK flows, race/stress/leak suites, SDK registration/config fuzzing, and dispatch benchmarks.
 
-**Acceptance:** direct `dgpv1` users remain source-compatible and `cmd/api_datagram` has migrated, but command routing, documentation/examples, and release evidence are incomplete.
+**Acceptance:** direct `dgpv1` users remain source-compatible and `cmd/api_datagram` has migrated; broader documentation/examples and release evidence are incomplete.
 
 ### MVP messenger development boundary
 
