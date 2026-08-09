@@ -326,7 +326,7 @@ Integration tests still use real loopback TCP plus a `dgpv1` client for handshak
 
 ### Phase D — compatibility, examples, and release
 
-- [ ] Migrate `cmd/api_datagram` to `pkg/dgpserver` without changing protocol behavior.
+- [x] Migrate `cmd/api_datagram` to `pkg/dgpserver` without changing protocol behavior.
 - [ ] Add echo, authenticated, command-router, middleware, graceful-shutdown, and migration examples.
 - [ ] Add real-TCP tests, race/stress/leak tests, fuzz registration/config boundaries, and benchmarks for dispatch overhead.
 
