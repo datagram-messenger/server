@@ -22,7 +22,7 @@ func TestLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Address != "127.0.0.1:9000" || cfg.IdleTimeout != 45*time.Second || cfg.KeepaliveInterval != 15*time.Second || cfg.KeepaliveTimeout != 25*time.Second || cfg.OutboundQueue != 8 || cfg.HandlerQueue != 6 || cfg.MaxConcurrentHandshakes != 4 || cfg.MaxActiveConnections != 12 {
+	if cfg.Address != "127.0.0.1:9000" || cfg.ReadTimeout != 0 || cfg.IdleTimeout != 45*time.Second || cfg.KeepaliveInterval != 15*time.Second || cfg.KeepaliveTimeout != 25*time.Second || cfg.OutboundQueue != 8 || cfg.HandlerQueue != 6 || cfg.MaxConcurrentHandshakes != 4 || cfg.MaxActiveConnections != 12 {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 }

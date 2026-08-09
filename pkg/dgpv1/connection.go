@@ -441,6 +441,7 @@ func (c *Connection) maintenanceLoop() {
 					pongDeadline = nil
 				}
 				resetTimer(keepaliveTimer, c.config.KeepaliveInterval)
+				keepalive = keepaliveTimer.C
 			}
 		case <-keepalive:
 			if outstanding != 0 {

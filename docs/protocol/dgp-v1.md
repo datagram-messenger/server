@@ -176,7 +176,7 @@ there).
 | Reserved         | 37     | 3            | —         | MUST be zero on send and preserved on receive as part of the exact AEAD associated data. |
 | Payload          | 40     | variable     | `bytes`   | AEAD ciphertext of the L4 message, or a Noise handshake message for Msg Type `0x01`/`0x02`. |
 | AEAD Tag         | 40+PL  | 0 or 16      | `bytes16` | Absent on handshake frames (`0x01` and `0x02`); otherwise the 128-bit Poly1305 or GCM authentication tag. Noise provides handshake-message authentication internally. |
-| Padding          | ...    | Pad Length   | `bytes`   | Cryptographically random bytes, not covered by the AEAD tag's confidentiality guarantee for content but MAY be included in the AEAD associated data for integrity of the length field (implementation choice, RECOMMENDED). |
+| Padding          | ...    | Pad Length   | `bytes`   | Cryptographically random cleartext bytes. For encrypted frames every padding octet MUST be appended to the 40-byte header when forming AEAD associated data, so the tag authenticates the padding without encrypting it. |
 
 Handshake frames use a zero Session ID and Sequence Number because those
 values are established only after the third Noise XX flight completes.
@@ -198,7 +198,7 @@ directly from plaintext size. Instead, implementations SHOULD apply
 boundary in a fixed set (e.g., 256 / 512 / 1024 / 1500 bytes), computing
 `Pad Length` accordingly, capped at 255. Padding bytes MUST be
 cryptographically random, not zero-filled, to avoid a distinct statistical
-signature.
+signature. Encrypted-frame AAD is exactly `header[0:40] || padding`. This changes v1 wire semantics for padded frames: layout and unpadded bytes are unchanged, but legacy padded frames that authenticated only the header are rejected.
 
 ---
 
@@ -208,7 +208,7 @@ signature.
 
 The MVP uses only `Noise_XX_25519_ChaChaPoly_SHA256`. It is a three-flight,
 1.5-RTT mutual-authentication handshake. Implementations MUST reject any
-other pattern in the MVP profile.
+other pattern in the MVP profile. Before processing the first Noise token, both peers MUST call `MixHash(prologue)` with the exact five ASCII octets `44 47 50 76 31` (`DGPv1`), with no NUL terminator, length prefix, or newline.
 
 ### 4.2 Phase 1 — Client Hello / Ephemeral Key Exchange (Msg Type `0x01`)
 
@@ -251,7 +251,7 @@ HandshakeFinish Payload (client → server, Noise XX message 3):
 ```
 
 The client and server MUST NOT enter the encrypted-session state or use the
-Session ID until message 3 has been produced or authenticated, respectively.
+Session ID until message 3 has been produced or authenticated, respectively. Let `channel_binding` be Noise's final 32-byte handshake hash returned by `ChannelBinding()` after message 3. Both peers MUST derive `SessionID = SHA-256(ASCII("DGPv1 SessionID") || channel_binding)[0:16]`; concatenation has no separator or length prefix.
 At that point both parties compute the full Diffie-Hellman transcript and
 derive the session key schedule via the Noise `Split()` convention. The two
 independent, directional 256-bit traffic keys are exactly the standard Noise

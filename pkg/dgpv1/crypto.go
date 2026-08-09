@@ -61,8 +61,9 @@ func NewCodec(suite CipherSuite, key []byte) (*Codec, error) {
 	return &Codec{aead: aead}, nil
 }
 
-// Encrypt creates an encrypted frame. Padding is generated independently of
-// the ciphertext and is authenticated only indirectly through PadLength in AAD.
+// Encrypt creates an encrypted frame. The cleartext random padding is included
+// in AEAD associated data, authenticating every transmitted byte without
+// changing the v1 frame layout. Unpadded v1 frames retain their prior encoding.
 func (c *Codec) Encrypt(messageType MessageType, sessionID [16]byte, sequence uint64, plaintext []byte, padLength uint8) (Frame, error) {
 	if err := validateEncryptedHeader(messageType, sessionID, sequence); err != nil {
 		return Frame{}, err
@@ -72,15 +73,16 @@ func (c *Codec) Encrypt(messageType MessageType, sessionID [16]byte, sequence ui
 	}
 
 	header := NewHeader(messageType, sessionID, sequence, uint32(len(plaintext)), padLength)
-	aad, err := header.MarshalBinary()
+	headerBytes, err := header.MarshalBinary()
 	if err != nil {
 		return Frame{}, err
 	}
-	sealed := c.aead.Seal(nil, nonce(sequence), plaintext, aad)
 	padding, err := randomBytes(rand.Reader, int(padLength))
 	if err != nil {
 		return Frame{}, fmt.Errorf("dgpv1: generate padding: %w", err)
 	}
+	aad := append(headerBytes, padding...)
+	sealed := c.aead.Seal(nil, nonce(sequence), plaintext, aad)
 	return NewFrame(messageType, sessionID, sequence, sealed[:len(plaintext)], sealed[len(plaintext):], padding)
 }
 
@@ -93,10 +95,11 @@ func (c *Codec) Decrypt(frame Frame) ([]byte, error) {
 	if err := validateEncryptedHeader(frame.Header.MessageType, frame.Header.SessionID, frame.Header.Sequence); err != nil {
 		return nil, err
 	}
-	aad, err := frame.Header.marshalBinary(false)
+	headerBytes, err := frame.Header.marshalBinary(false)
 	if err != nil {
 		return nil, err
 	}
+	aad := append(headerBytes, frame.Padding...)
 	sealed := make([]byte, 0, len(frame.Payload)+AEADTagSize)
 	sealed = append(sealed, frame.Payload...)
 	sealed = append(sealed, frame.Tag[:]...)

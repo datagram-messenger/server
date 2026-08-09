@@ -16,7 +16,9 @@ const noiseKeySize = 32
 var (
 	// ErrHandshake indicates a failed or out-of-order Noise handshake operation.
 	ErrHandshake = errors.New("dgpv1: handshake failed")
-	noiseSuite   = noise.NewCipherSuite(noise.DH25519, noise.CipherChaChaPoly, noise.HashSHA256)
+	// ErrInvalidStaticKey indicates a missing or internally inconsistent key pair.
+	ErrInvalidStaticKey = errors.New("dgpv1: invalid static key")
+	noiseSuite          = noise.NewCipherSuite(noise.DH25519, noise.CipherChaChaPoly, noise.HashSHA256)
 )
 
 // StaticKey is a Noise X25519 static identity.
@@ -60,6 +62,17 @@ func staticKeyFromPair(pair noise.DHKey) (StaticKey, error) {
 
 // Public returns an owned copy of the static public key.
 func (k StaticKey) Public() []byte { return append([]byte(nil), k.public[:]...) }
+
+func (k StaticKey) validate() error {
+	if k.private == ([noiseKeySize]byte{}) || k.public == ([noiseKeySize]byte{}) {
+		return ErrInvalidStaticKey
+	}
+	derived, err := LoadStaticKey(k.private[:])
+	if err != nil || subtle.ConstantTimeCompare(derived.public[:], k.public[:]) != 1 {
+		return ErrInvalidStaticKey
+	}
+	return nil
+}
 
 func (k StaticKey) noiseKey() noise.DHKey {
 	return noise.DHKey{Private: append([]byte(nil), k.private[:]...), Public: append([]byte(nil), k.public[:]...)}
@@ -114,6 +127,9 @@ func NewResponderHandshake(static StaticKey, expectedInitiatorStatic []byte) (*H
 }
 
 func newHandshake(role handshakeRole, static StaticKey, expectedPeer []byte, random io.Reader, prologue []byte) (*Handshake, error) {
+	if err := static.validate(); err != nil {
+		return nil, err
+	}
 	if len(expectedPeer) != 0 && len(expectedPeer) != noiseKeySize {
 		return nil, ErrHandshake
 	}

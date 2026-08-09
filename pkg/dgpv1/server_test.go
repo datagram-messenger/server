@@ -18,6 +18,11 @@ func generateTestStaticKey(t *testing.T) StaticKey {
 	return key
 }
 
+func validServerConfig(t *testing.T) ServerConfig {
+	t.Helper()
+	return ServerConfig{StaticKey: generateTestStaticKey(t)}
+}
+
 func TestServerHandshakeAndDataTransfer(t *testing.T) {
 	serverKey := generateTestStaticKey(t)
 	clientKey := generateTestStaticKey(t)
@@ -160,8 +165,32 @@ func TestServerHandshakeAndDataTransfer(t *testing.T) {
 	_ = clientSession.Close()
 }
 
+func TestNewServerRejectsInvalidStaticKeyEarly(t *testing.T) {
+	if _, err := NewServer(ServerConfig{}); !errors.Is(err, ErrInvalidStaticKey) {
+		t.Fatalf("zero key error = %v", err)
+	}
+	key := generateTestStaticKey(t)
+	key.public[0] ^= 1
+	if _, err := NewServer(ServerConfig{StaticKey: key}); !errors.Is(err, ErrInvalidStaticKey) {
+		t.Fatalf("mismatched key error = %v", err)
+	}
+}
+
+func TestNewServerTimeoutConsistency(t *testing.T) {
+	config := validServerConfig(t)
+	config.ReadTimeout = time.Second
+	config.IdleTimeout = 2 * time.Second
+	if _, err := NewServer(config); err == nil {
+		t.Fatal("expected read timeout shorter than idle timeout to fail")
+	}
+	config.ReadTimeout = 0
+	if _, err := NewServer(config); err != nil {
+		t.Fatalf("disabled read timeout: %v", err)
+	}
+}
+
 func TestNewServerAdmissionDefaults(t *testing.T) {
-	server, err := NewServer(ServerConfig{})
+	server, err := NewServer(validServerConfig(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +218,7 @@ func TestNewServerRejectsNegativeAdmissionLimits(t *testing.T) {
 }
 
 func TestServerHandshakeAdmissionSaturationAndRelease(t *testing.T) {
-	server, err := NewServer(ServerConfig{MaxConcurrentHandshakes: 1})
+	server, err := NewServer(func() ServerConfig { c := validServerConfig(t); c.MaxConcurrentHandshakes = 1; return c }())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +236,7 @@ func TestServerHandshakeAdmissionSaturationAndRelease(t *testing.T) {
 }
 
 func TestServerConnectionAdmissionSaturationAndRelease(t *testing.T) {
-	server, err := NewServer(ServerConfig{MaxActiveConnections: 1})
+	server, err := NewServer(func() ServerConfig { c := validServerConfig(t); c.MaxActiveConnections = 1; return c }())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +254,12 @@ func TestServerConnectionAdmissionSaturationAndRelease(t *testing.T) {
 }
 
 func TestServerReleasesHandshakeSlotAfterFailure(t *testing.T) {
-	server, err := NewServer(ServerConfig{MaxConcurrentHandshakes: 1, HandshakeTimeout: time.Second})
+	server, err := NewServer(func() ServerConfig {
+		c := validServerConfig(t)
+		c.MaxConcurrentHandshakes = 1
+		c.HandshakeTimeout = time.Second
+		return c
+	}())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +285,7 @@ func TestServerReleasesHandshakeSlotAfterFailure(t *testing.T) {
 }
 
 func TestServerReleasesConnectionSlotAfterClose(t *testing.T) {
-	server, err := NewServer(ServerConfig{MaxActiveConnections: 1})
+	server, err := NewServer(func() ServerConfig { c := validServerConfig(t); c.MaxActiveConnections = 1; return c }())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +300,7 @@ func TestServerReleasesConnectionSlotAfterClose(t *testing.T) {
 }
 
 func TestServerCloseInterruptsStalledHandshake(t *testing.T) {
-	server, err := NewServer(ServerConfig{HandshakeTimeout: 30 * time.Second})
+	server, err := NewServer(func() ServerConfig { c := validServerConfig(t); c.HandshakeTimeout = 30 * time.Second; return c }())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +348,7 @@ func TestServerCloseInterruptsStalledHandshake(t *testing.T) {
 }
 
 func TestServerCloseIsIdempotent(t *testing.T) {
-	server, err := NewServer(ServerConfig{})
+	server, err := NewServer(validServerConfig(t))
 	if err != nil {
 		t.Fatal(err)
 	}

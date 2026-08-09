@@ -52,7 +52,8 @@ type ServerConfig struct {
 	// HandshakeTimeout controls the maximum duration allowed to complete the Noise XX exchange.
 	HandshakeTimeout time.Duration
 
-	// ReadTimeout sets the network read deadline per frame.
+	// ReadTimeout sets an optional network read deadline per frame. Zero disables
+	// it so IdleTimeout and keepalive liveness remain the authoritative deadlines.
 	ReadTimeout time.Duration
 
 	// WriteTimeout sets the network write deadline per frame.
@@ -113,8 +114,23 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if config.CipherSuite != CipherChaCha20Poly1305 {
 		return nil, fmt.Errorf("%w: DGPv1 requires ChaCha20-Poly1305", ErrUnsupportedCipher)
 	}
+	if err := config.StaticKey.validate(); err != nil {
+		return nil, err
+	}
 	if config.HandshakeTimeout < 0 {
 		return nil, errors.New("dgpv1: HandshakeTimeout must not be negative")
+	}
+	if config.ReadTimeout < 0 || config.WriteTimeout < 0 || config.IdleTimeout < 0 || config.KeepaliveInterval < 0 {
+		return nil, errors.New("dgpv1: connection timeouts must not be negative")
+	}
+	if config.ReadTimeout > 0 {
+		livenessWindow := config.IdleTimeout
+		if keepaliveWindow := config.KeepaliveInterval + config.KeepaliveTimeout; keepaliveWindow > livenessWindow {
+			livenessWindow = keepaliveWindow
+		}
+		if livenessWindow > 0 && config.ReadTimeout < livenessWindow {
+			return nil, errors.New("dgpv1: ReadTimeout must be zero or at least the idle/keepalive liveness window")
+		}
 	}
 	if config.HandshakeTimeout == 0 {
 		config.HandshakeTimeout = 10 * time.Second

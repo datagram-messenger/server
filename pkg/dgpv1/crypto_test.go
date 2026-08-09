@@ -120,15 +120,15 @@ func TestCodecWrongKeyFailsAuthentication(t *testing.T) {
 	}
 }
 
-func TestCodecAcceptsZeroPaddingByte(t *testing.T) {
+func TestCodecAuthenticatesPadding(t *testing.T) {
 	codec, _ := NewCodec(CipherChaCha20Poly1305, make([]byte, KeySize))
 	frame, err := codec.Encrypt(MessageTypeEncryptedData, [16]byte{1}, 1, nil, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	frame.Padding[0] = 0
-	if _, err := codec.Decrypt(frame); err != nil {
-		t.Fatalf("Decrypt() error = %v", err)
+	frame.Padding[0] ^= 1
+	if _, err := codec.Decrypt(frame); err != ErrAuthentication {
+		t.Fatalf("Decrypt() error = %v, want %v", err, ErrAuthentication)
 	}
 }
 

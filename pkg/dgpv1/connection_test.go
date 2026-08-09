@@ -256,14 +256,18 @@ func TestConnectionPeriodicKeepaliveAndPong(t *testing.T) {
 	defer cleanup()
 	connection.Start(context.Background())
 
-	ping, ok := readConnectionMessage(t, peerTransport, peerSession).(*PingPong)
-	if !ok || ping.IsResponse || ping.Nonce == 0 {
-		t.Fatalf("ping = %#v", ping)
+	var previous uint64
+	for cycle := 0; cycle < 3; cycle++ {
+		ping, ok := readConnectionMessage(t, peerTransport, peerSession).(*PingPong)
+		if !ok || ping.IsResponse || ping.Nonce <= previous {
+			t.Fatalf("cycle %d ping = %#v, previous nonce %d", cycle, ping, previous)
+		}
+		previous = ping.Nonce
+		writeConnectionMessage(t, peerTransport, peerSession, PingPong{IsResponse: true, Nonce: ping.Nonce})
 	}
-	writeConnectionMessage(t, peerTransport, peerSession, PingPong{IsResponse: true, Nonce: ping.Nonce})
 	select {
 	case <-connection.Done():
-		t.Fatalf("connection stopped after valid pong: %v", connection.Err())
+		t.Fatalf("connection stopped after valid pong cycles: %v", connection.Err())
 	default:
 	}
 }

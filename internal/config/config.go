@@ -49,7 +49,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		Address:                 envOr("DGP_ADDRESS", ":8090"),
 		HandshakeTimeout:        10 * time.Second,
-		ReadTimeout:             30 * time.Second,
+		ReadTimeout:             0,
 		WriteTimeout:            10 * time.Second,
 		IdleTimeout:             2 * time.Minute,
 		KeepaliveInterval:       30 * time.Second,
@@ -73,7 +73,7 @@ func Load() (Config, error) {
 	if cfg.HandshakeTimeout, err = durationEnv("DGP_HANDSHAKE_TIMEOUT", cfg.HandshakeTimeout); err != nil {
 		return Config{}, err
 	}
-	if cfg.ReadTimeout, err = durationEnv("DGP_READ_TIMEOUT", cfg.ReadTimeout); err != nil {
+	if cfg.ReadTimeout, err = nonNegativeDurationEnv("DGP_READ_TIMEOUT", cfg.ReadTimeout); err != nil {
 		return Config{}, err
 	}
 	if cfg.WriteTimeout, err = durationEnv("DGP_WRITE_TIMEOUT", cfg.WriteTimeout); err != nil {
@@ -130,6 +130,18 @@ func durationEnv(key string, fallback time.Duration) (time.Duration, error) {
 	duration, err := time.ParseDuration(value)
 	if err != nil || duration <= 0 {
 		return 0, fmt.Errorf("config: %s must be a positive duration", key)
+	}
+	return duration, nil
+}
+
+func nonNegativeDurationEnv(key string, fallback time.Duration) (time.Duration, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback, nil
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration < 0 {
+		return 0, fmt.Errorf("config: %s must be a non-negative duration", key)
 	}
 	return duration, nil
 }
