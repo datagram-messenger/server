@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/tr1xdev/datagram-server.git/pkg/dgpv1"
+	"github.com/tr1xdev/datagram-server/pkg/dgpv1"
 )
 
 func TestCommandRouterDispatchAndGroups(t *testing.T) {

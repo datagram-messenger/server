@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tr1xdev/datagram-server.git/pkg/dgpv1"
+	"github.com/tr1xdev/datagram-server/pkg/dgpv1"
 )
 
 // RecordedSend is one defensively copied send accepted by Recorder.

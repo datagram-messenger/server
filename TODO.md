@@ -822,3 +822,7 @@ Features intentionally deferred from the first slice:
 - [x] Produce documented archives and mandatory `SHA256SUMS` through the locally reproducible release script.
 - [x] Expose and test release version metadata through `-version`.
 - [ ] Define target infrastructure, operational ownership, and credentials before adding any production deployment.
+
+## Completed maintenance
+
+- [x] Corrected the Go module and internal import paths by removing the erroneous `.git` suffix.

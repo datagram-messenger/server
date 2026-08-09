@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tr1xdev/datagram-server.git/pkg/dgpv1"
+	"github.com/tr1xdev/datagram-server/pkg/dgpv1"
 )
 
 const runtimeTimeout = 2 * time.Second

@@ -1,4 +1,4 @@
-module github.com/tr1xdev/datagram-server.git
+module github.com/tr1xdev/datagram-server
 
 go 1.25.0
 

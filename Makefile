@@ -15,7 +15,7 @@ COVERAGE_PACKAGES := ./internal/... ./pkg/...
 BENCHMARK_PACKAGE := ./pkg/dgpv1
 BENCHMARK_REGEX := ^BenchmarkMessengerWireFormats$$
 BENCHMARK_RESULTS := benchmarks/results
-MODULE := github.com/tr1xdev/datagram-server.git
+MODULE := github.com/tr1xdev/datagram-server
 RELEASE_TARGETS := linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64
 
 .PHONY: help build test coverage benchmark release verify-release clean check-go check-release-tools check-version

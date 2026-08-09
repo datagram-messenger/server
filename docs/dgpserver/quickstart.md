@@ -10,8 +10,8 @@ import (
     "net"
     "time"
 
-    "github.com/tr1xdev/datagram-server.git/pkg/dgpserver"
-    "github.com/tr1xdev/datagram-server.git/pkg/dgpv1"
+    "github.com/tr1xdev/datagram-server/pkg/dgpserver"
+    "github.com/tr1xdev/datagram-server/pkg/dgpv1"
 )
 
 func serve(ctx context.Context, ln net.Listener, serverKey dgpv1.StaticKey, clientKey [32]byte) error {

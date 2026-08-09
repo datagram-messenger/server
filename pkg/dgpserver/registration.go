@@ -1,6 +1,6 @@
 package dgpserver
 
-import "github.com/tr1xdev/datagram-server.git/pkg/dgpv1"
+import "github.com/tr1xdev/datagram-server/pkg/dgpv1"
 
 // Handle registers a typed application handler using the contract-level API.
 // T must be a non-pointer ApplicationMessage; the handler receives *T.

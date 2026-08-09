@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tr1xdev/datagram-server.git/internal/buildinfo"
-	"github.com/tr1xdev/datagram-server.git/internal/config"
-	"github.com/tr1xdev/datagram-server.git/pkg/dgpserver"
-	"github.com/tr1xdev/datagram-server.git/pkg/dgpv1"
+	"github.com/tr1xdev/datagram-server/internal/buildinfo"
+	"github.com/tr1xdev/datagram-server/internal/config"
+	"github.com/tr1xdev/datagram-server/pkg/dgpserver"
+	"github.com/tr1xdev/datagram-server/pkg/dgpv1"
 )
 
 const (
