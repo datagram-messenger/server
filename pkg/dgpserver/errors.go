@@ -16,8 +16,12 @@ var (
 	ErrUnsupportedMessage = errors.New("dgpserver: unsupported message")
 	// ErrInvalidMessageForm indicates that Dispatch received a value instead of the documented pointer form.
 	ErrInvalidMessageForm = errors.New("dgpserver: inbound messages must use pointer form")
-	// ErrNotFound indicates that no handler is registered for a supported message type.
-	ErrNotFound = errors.New("dgpserver: handler not found")
+	// ErrNotHandled indicates that no handler is registered for a supported message type.
+	// It is nonfatal in the production runtime, but is returned by Router.Dispatch
+	// so callers and ErrorHandler can observe it.
+	ErrNotHandled = errors.New("dgpserver: message not handled")
+	// ErrNotFound is retained as a backward-compatible alias for ErrNotHandled.
+	ErrNotFound = ErrNotHandled
 	// ErrHandlerPanic indicates that Dispatch recovered a handler panic.
 	ErrHandlerPanic = errors.New("dgpserver: handler panic")
 	// ErrRecorderFull indicates that a Recorder has reached its configured bound.

@@ -31,20 +31,16 @@ func (p Peer) Identity() []byte { return append([]byte(nil), p.identity...) }
 // Metadata is immutable per-message dispatch metadata.
 type Metadata struct {
 	messageType dgpv1.MessageType
-	sequence    uint64
 	receivedAt  time.Time
 }
 
 // NewMetadata constructs per-message metadata.
-func NewMetadata(messageType dgpv1.MessageType, sequence uint64, receivedAt time.Time) Metadata {
-	return Metadata{messageType: messageType, sequence: sequence, receivedAt: receivedAt}
+func NewMetadata(messageType dgpv1.MessageType, receivedAt time.Time) Metadata {
+	return Metadata{messageType: messageType, receivedAt: receivedAt}
 }
 
 // MessageType returns the exact DGP message type.
 func (m Metadata) MessageType() dgpv1.MessageType { return m.messageType }
-
-// Sequence returns the inbound frame sequence number.
-func (m Metadata) Sequence() uint64 { return m.sequence }
 
 // ReceivedAt returns the message arrival time.
 func (m Metadata) ReceivedAt() time.Time { return m.receivedAt }
@@ -83,10 +79,11 @@ type sendCapability interface {
 // It intentionally is not a general-purpose state bag and does not expose dgpv1.Connection.
 type Context struct {
 	context.Context
-	peer     Peer
-	metadata Metadata
-	params   Params
-	sender   sendCapability
+	peer      Peer
+	principal Principal
+	metadata  Metadata
+	params    Params
+	sender    sendCapability
 }
 
 // NewContext creates a receive-only handler context.
@@ -95,11 +92,18 @@ func NewContext(ctx context.Context, peer Peer, metadata Metadata, params Params
 }
 
 func newContext(ctx context.Context, peer Peer, metadata Metadata, params Params, sender sendCapability) *Context {
+	return newContextWithPrincipal(ctx, peer, nil, metadata, params, sender)
+}
+
+func newContextWithPrincipal(ctx context.Context, peer Peer, principal Principal, metadata Metadata, params Params, sender sendCapability) *Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &Context{Context: ctx, peer: NewPeer(peer.address, peer.sessionID, peer.identity), metadata: metadata, params: NewParams(params.values), sender: sender}
+	return &Context{Context: ctx, peer: NewPeer(peer.address, peer.sessionID, peer.identity), principal: principal, metadata: metadata, params: NewParams(params.values), sender: sender}
 }
+
+// Principal returns the identity produced by the configured Authenticator.
+func (c *Context) Principal() Principal { return c.principal }
 
 // Peer returns the immutable peer snapshot.
 func (c *Context) Peer() Peer { return NewPeer(c.peer.address, c.peer.sessionID, c.peer.identity) }

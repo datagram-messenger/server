@@ -179,7 +179,7 @@ func TestContextSnapshotsAndOwnership(t *testing.T) {
 	values := map[string]string{"id": "old"}
 	peer := NewPeer("remote", [16]byte{7}, identity)
 	params := NewParams(values)
-	metadata := NewMetadata(dgpv1.MessageTypeAck, 11, time.Unix(5, 0))
+	metadata := NewMetadata(dgpv1.MessageTypeAck, time.Unix(5, 0))
 	ctx := NewContext(context.Background(), peer, metadata, params)
 	identity[0] = 9
 	values["id"] = "new"
@@ -196,7 +196,7 @@ func TestContextSnapshotsAndOwnership(t *testing.T) {
 	if got, _ := ctx.Params().Get("id"); got != "old" {
 		t.Fatal("params map aliases snapshot")
 	}
-	if ctx.Metadata().MessageType() != dgpv1.MessageTypeAck || ctx.Metadata().Sequence() != 11 {
+	if ctx.Metadata().MessageType() != dgpv1.MessageTypeAck || !ctx.Metadata().ReceivedAt().Equal(time.Unix(5, 0)) {
 		t.Fatal("metadata mismatch")
 	}
 	if ctx.Peer().Address() != "remote" || ctx.Peer().SessionID()[0] != 7 {
