@@ -12,5 +12,5 @@ fi
 out="benchmarks/results"
 mkdir -p "$out"
 go version > "$out/go-version.txt"
-go test ./pkg/dgpv1 -run '^$' -bench '^(BenchmarkMessengerWireFormats|BenchmarkSyntheticWireCodecs)$' -benchmem -benchtime "$benchtime" -count "$count" | tee "$out/latest.txt"
-go test ./pkg/dgpv1 -run '^$' -bench '^(BenchmarkMessengerWireFormats|BenchmarkSyntheticWireCodecs)$' -benchmem -benchtime "$benchtime" -count "$count" -json > "$out/latest.jsonl"
+go test ./pkg/dgpv1 -run '^$' -bench '^BenchmarkMessengerWireFormats$' -benchmem -benchtime "$benchtime" -count "$count" | tee "$out/latest.txt"
+go test ./pkg/dgpv1 -run '^$' -bench '^BenchmarkMessengerWireFormats$' -benchmem -benchtime "$benchtime" -count "$count" -json > "$out/latest.jsonl"

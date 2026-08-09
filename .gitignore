@@ -17,6 +17,10 @@ coverage.*
 *.coverprofile
 profile.cov
 
+# Machine-specific benchmark output (portfolio SVG is intentionally published)
+benchmarks/results/*
+!benchmarks/results/README.md
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
