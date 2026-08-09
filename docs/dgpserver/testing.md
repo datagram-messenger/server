@@ -92,3 +92,18 @@ BenchmarkDispatchOverhead/FrozenCommandRouter-16               46.49 ns/op     0
 ```
 
 These numbers are machine- and toolchain-specific reference data, not a release threshold. Compare changes using repeated runs on the same controlled host; investigate evidence before optimizing implementation code.
+
+## Registration and configuration fuzzing
+
+Run the deterministic seed corpus and then each target separately from the repository root:
+
+```sh
+go test ./pkg/dgpserver -run '^Fuzz(ConfigValidationBoundaries|RouterRegistrationState|CommandRouterRegistrationState)$' -count=1
+go test ./pkg/dgpserver -run '^$' -fuzz '^FuzzConfigValidationBoundaries$' -fuzztime=2s
+go test ./pkg/dgpserver -run '^$' -fuzz '^FuzzRouterRegistrationState$' -fuzztime=2s
+go test ./pkg/dgpserver -run '^$' -fuzz '^FuzzCommandRouterRegistrationState$' -fuzztime=2s
+```
+
+The targets are deliberately network- and crypto-free. Inputs select from bounded duration, queue, connection-limit, message-type, handler-form, duplicate, group, and freeze-state domains rather than treating arbitrary bytes as configuration. The invariants are: no panic; repeatable `New` error classification; application of the documented five-second disconnect default; rejection of a negative `DisconnectTimeout`; exact preservation of delegated DGP duration, queue, and connection-limit boundaries until runtime construction; and stable nil, unsupported, duplicate, and post-freeze registration errors. Command registration also checks conflicts across direct and grouped routes over the complete `uint8` command range.
+
+A two-second target run is only a quick local smoke check. CI or scheduled verification should run the same targets separately with a materially longer fuzz time so a failure is attributable to one state model. Decoder-error behavior and concurrent shutdown/send races remain outside these registration/configuration targets and require separate release-gate coverage.
