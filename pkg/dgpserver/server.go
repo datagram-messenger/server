@@ -75,6 +75,7 @@ type Server struct {
 	core       *dgpv1.Server
 	listener   net.Listener
 	started    bool
+	stopping   bool
 	closed     bool
 	serveDone  chan struct{}
 	serveError error
@@ -150,7 +151,11 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	}
 	s.mu.Lock()
 	s.core = core
+	stopping := s.stopping
 	s.mu.Unlock()
+	if stopping {
+		_ = core.Close()
+	}
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -160,10 +165,16 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	}()
 	err = core.Serve(listener)
 	s.finishServe(err)
-	if errors.Is(err, dgpv1.ErrServerClosed) {
+	if errors.Is(err, dgpv1.ErrServerClosed) || (s.wasStopping() && errors.Is(err, net.ErrClosed)) {
 		return nil
 	}
 	return err
+}
+
+func (s *Server) wasStopping() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stopping
 }
 
 func (s *Server) finishServe(err error) {
@@ -185,6 +196,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		ctx = context.Background()
 	}
 	s.mu.Lock()
+	s.stopping = true
 	core, listener, started, done := s.core, s.listener, s.started, s.serveDone
 	if !started {
 		if !s.closed {
@@ -216,6 +228,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // Close immediately closes the listener and all active connections.
 func (s *Server) Close() error {
 	s.mu.Lock()
+	s.stopping = true
 	core, listener := s.core, s.listener
 	if !s.started && !s.closed {
 		s.closed = true
