@@ -1,0 +1,21 @@
+# Copy to config.yaml for local use. Never commit real key material.
+address: "127.0.0.1:8090"
+
+# Placeholder only: override with DGP_STATIC_KEY or use static_key_file.
+static_key: "0000000000000000000000000000000000000000000000000000000000000000"
+# static_key_file: "./secrets/noise-static-key.hex"
+
+# Fail-closed allowlist: 64-hex Noise public key -> unique principal.
+peer_identities:
+  "1111111111111111111111111111111111111111111111111111111111111111": "example-client"
+
+handshake_timeout: "10s"
+read_timeout: "0s" # zero disables per-frame read deadlines
+write_timeout: "10s"
+idle_timeout: "2m"
+keepalive_interval: "30s"
+keepalive_timeout: "60s"
+outbound_queue: 64
+handler_queue: 64
+max_concurrent_handshakes: 64
+max_active_connections: 1024

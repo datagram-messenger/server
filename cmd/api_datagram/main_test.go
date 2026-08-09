@@ -123,7 +123,7 @@ func TestNewServerConfigurationErrors(t *testing.T) {
 func TestRunRejectsMissingStaticKey(t *testing.T) {
 	t.Setenv("DGP_STATIC_KEY", "")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := run(context.Background(), logger); !errors.Is(err, config.ErrStaticKeyRequired) {
+	if err := run(context.Background(), logger, ""); !errors.Is(err, config.ErrStaticKeyRequired) {
 		t.Fatalf("run error = %v, want %v", err, config.ErrStaticKeyRequired)
 	}
 }

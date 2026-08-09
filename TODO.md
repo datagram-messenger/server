@@ -801,3 +801,7 @@ Features intentionally deferred from the first slice:
 - distributed rate limiting;
 - protocol resumption support;
 - generic application RPC semantics.
+
+## Configuration series
+- [x] Add the typed Viper loader and fully migrate api_datagram.
+- [ ] Migrate api_bot, auth, and user when those command entrypoints gain runtime configuration.

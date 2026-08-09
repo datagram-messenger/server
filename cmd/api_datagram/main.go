@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net"
@@ -27,10 +28,12 @@ const (
 )
 
 func main() {
+	configPath := flag.String("config", "", "path to YAML configuration file")
+	flag.Parse()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, logger); err != nil {
+	if err := run(ctx, logger, *configPath); err != nil {
 		logger.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
@@ -151,8 +154,8 @@ func newServer(cfg config.Config, logger *slog.Logger) (*dgpserver.Server, error
 	return server, nil
 }
 
-func run(ctx context.Context, logger *slog.Logger) error {
-	cfg, err := config.Load()
+func run(ctx context.Context, logger *slog.Logger, configPath string) error {
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

@@ -28,8 +28,14 @@ benchmarks/results/*
 go.work
 go.work.sum
 
-# env file
+# Local configuration and secrets (examples remain tracked)
 .env
+config.yaml
+config.local.yaml
+config/*.yaml
+!config/*.example.yaml
+secrets/
+*.secret.yaml
 
 # Editor/IDE
 # .idea/

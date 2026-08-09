@@ -11,7 +11,9 @@ The normative wire protocol is documented in [`docs/protocol/dgp-v1.md`](docs/pr
 
 ## Configure the server
 
-`DGP_STATIC_KEY` is required and must contain exactly 32 bytes encoded as 64 hexadecimal characters. `DGP_PEER_IDENTITIES` is also required and is a comma-separated allowlist of `<64-hex Noise static public key>=<principal>` entries. Unknown peers are rejected; there is no permissive production default. Keys and principals must be non-empty and unique, and whitespace is not accepted. Generate it once per server identity, store it in a secret manager, and reuse it across restarts. Do not commit it, paste it into logs, or use the examples below as production key material.
+`api_datagram` uses a typed Viper configuration layer. Precedence is explicit `-config` path, environment overrides, the selected/default YAML file, then secure defaults. Without `-config`, it searches `./config.yaml` and `./config/config.yaml`; a missing default file is allowed, while a missing explicit file fails startup. Unknown YAML fields fail loading.
+
+Copy `config.example.yaml` to ignored `config.yaml`, replace placeholders locally, then run `go run ./cmd/api_datagram -config ./config.yaml`. `DGP_STATIC_KEY` must contain exactly 32 bytes encoded as 64 hexadecimal characters. YAML `peer_identities` is a map from a 64-hex Noise public key to a unique principal. The legacy `DGP_PEER_IDENTITIES=<key>=<principal>,...` override remains supported. Unknown peers are rejected; there is no permissive production default. Generate the static key once per server identity, store it in a secret manager, and reuse it across restarts. Do not commit it, paste it into logs, or use example material in production.
 
 ### Windows PowerShell
 
@@ -66,7 +68,12 @@ Go duration examples include `500ms`, `15s`, and `2m`. Invalid configuration pre
 ```powershell
 go test ./...
 go build -o .\bin\api_datagram.exe .\cmd\api_datagram
-go run .\cmd\api_datagram
+Copy-Item .\config.example.yaml .\config.yaml
+# Edit the ignored config.yaml, then:
+go run .\cmd\api_datagram -config .\config.yaml
+# Environment values override YAML:
+$env:DGP_ADDRESS = '127.0.0.1:9090'
+go run .\cmd\api_datagram -config .\config.yaml
 ```
 
 ### Platform-neutral
@@ -74,7 +81,11 @@ go run .\cmd\api_datagram
 ```sh
 go test ./...
 go build -o ./bin/api_datagram ./cmd/api_datagram
-go run ./cmd/api_datagram
+cp ./config.example.yaml ./config.yaml
+# Edit the ignored config.yaml, then:
+go run ./cmd/api_datagram -config ./config.yaml
+# Environment values override YAML:
+DGP_ADDRESS=127.0.0.1:9090 go run ./cmd/api_datagram -config ./config.yaml
 ```
 
 On success, the server logs its bound TCP address. The default is all interfaces on port `8090`; set `DGP_ADDRESS=127.0.0.1:8090` to listen only on the local machine.
