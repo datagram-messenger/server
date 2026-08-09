@@ -132,6 +132,7 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	s.mu.Unlock()
 	if err := s.router.Freeze(); err != nil {
 		_ = listener.Close()
+		s.finishServe(err)
 		return err
 	}
 
@@ -142,6 +143,7 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	core, err := dgpv1.NewServer(coreConfig)
 	if err != nil {
 		_ = listener.Close()
+		s.finishServe(err)
 		return err
 	}
 	s.mu.Lock()
@@ -155,17 +157,21 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 		}
 	}()
 	err = core.Serve(listener)
+	s.finishServe(err)
+	if errors.Is(err, dgpv1.ErrServerClosed) {
+		return nil
+	}
+	return err
+}
+
+func (s *Server) finishServe(err error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.serveError = err
 	if !s.closed {
 		s.closed = true
 		close(s.serveDone)
 	}
-	s.mu.Unlock()
-	if errors.Is(err, dgpv1.ErrServerClosed) {
-		return nil
-	}
-	return err
 }
 
 // Shutdown starts graceful shutdown and waits for Serve and all admitted

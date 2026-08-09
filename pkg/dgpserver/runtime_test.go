@@ -3,7 +3,11 @@ package dgpserver
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
+	"time"
+
+	"github.com/tr1xdev/datagram-server.git/pkg/dgpv1"
 )
 
 func TestStaticKeyAllowlist(t *testing.T) {
@@ -41,6 +45,25 @@ func TestOpErrorWrapsShutdownCauseWithoutFormattingIt(t *testing.T) {
 	}
 	if err.Error() == cause.Error() {
 		t.Fatal("OpError exposed its cause")
+	}
+}
+
+func TestServeInitializationFailureCompletesShutdown(t *testing.T) {
+	server, err := New(Config{DGP: dgpv1.ServerConfig{CipherSuite: dgpv1.CipherSuite(255)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Serve(context.Background(), listener); err == nil {
+		t.Fatal("Serve succeeded with an unsupported cipher")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown after Serve initialization failure: %v", err)
 	}
 }
 

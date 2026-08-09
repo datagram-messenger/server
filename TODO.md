@@ -735,13 +735,13 @@ go vet ./...
 
 The first implementation should remain deliberately small:
 
-- [ ] Create `pkg/dgpserver`.
-- [ ] Implement `Context` and immutable `Peer`.
-- [ ] Implement typed routing for `EncryptedData`, `Ack`, and `ErrorMessage`.
-- [ ] Implement middleware composition.
-- [ ] Implement `OnConnect` and `OnDisconnect` exactly-once hooks.
-- [ ] Adapt the router to the existing `dgpv1.Server`.
-- [ ] Add a real-TCP echo integration test.
+- [x] Create `pkg/dgpserver`.
+- [x] Implement `Context` and immutable `Peer`.
+- [x] Implement typed routing for `EncryptedData`, `Ack`, and `ErrorMessage`.
+- [x] Implement middleware composition.
+- [x] Implement `OnConnect` and `OnDisconnect` exactly-once hooks.
+- [x] Adapt the router to the existing `dgpv1.Server`.
+- [x] Add a real-TCP echo integration test.
 - [ ] Add a minimal package example.
 
 Features intentionally deferred from the first slice:
