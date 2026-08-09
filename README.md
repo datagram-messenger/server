@@ -2,7 +2,7 @@
 
 Go implementation of the current DGPv1 MVP: a TCP server with a three-flight `Noise_XX_25519_ChaChaPoly_SHA256` handshake, encrypted DGPv1 sessions, replay protection, directional rekeying, keepalives, idle close, and graceful process shutdown.
 
-The normative wire protocol is documented in [`docs/protocol/dgp-v1.md`](docs/protocol/dgp-v1.md).
+The normative wire protocol is documented in [`docs/protocol/dgp-v1.md`](docs/protocol/dgp-v1.md). Before a release, follow the [`DGPv1 pre-deployment checklist`](docs/pre-deployment-checklist.md).
 
 ## Prerequisites
 
