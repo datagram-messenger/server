@@ -155,3 +155,16 @@ func assertEncryptedDataEqual(t *testing.T, got, want *dgpv1.EncryptedData) {
 		}
 	}
 }
+
+func TestProductionAuthenticator(t *testing.T) {
+	var allowed, unknown [32]byte
+	allowed[0], unknown[0] = 1, 2
+	auth := newAuthenticator(map[[32]byte]string{allowed: "alice"})
+	principal, err := auth.Authenticate(context.Background(), dgpserver.Credentials{PeerStatic: allowed})
+	if err != nil || principal != "alice" {
+		t.Fatalf("allowed principal=%v err=%v", principal, err)
+	}
+	if _, err := auth.Authenticate(context.Background(), dgpserver.Credentials{PeerStatic: unknown}); !errors.Is(err, dgpserver.ErrUnauthenticated) {
+		t.Fatalf("unknown error=%v", err)
+	}
+}

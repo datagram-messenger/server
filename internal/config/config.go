@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
 const staticKeySize = 32
+
+// ErrPeerIdentitiesRequired reports that DGP_PEER_IDENTITIES was not set.
+var ErrPeerIdentitiesRequired = errors.New("config: DGP_PEER_IDENTITIES is required")
 
 // ErrStaticKeyRequired reports that DGP_STATIC_KEY was not set.
 var ErrStaticKeyRequired = errors.New("config: DGP_STATIC_KEY is required")
@@ -20,6 +24,8 @@ type Config struct {
 	Address string
 	// StaticKey is the 32-byte server static key decoded from DGP_STATIC_KEY.
 	StaticKey [staticKeySize]byte
+	// PeerIdentities maps allowed Noise static public keys to unique principals.
+	PeerIdentities map[[staticKeySize]byte]string
 	// HandshakeTimeout limits completion of the initial protocol handshake.
 	HandshakeTimeout time.Duration
 	// ReadTimeout limits each transport read operation.
@@ -70,6 +76,11 @@ func Load() (Config, error) {
 	}
 	copy(cfg.StaticKey[:], key)
 
+	cfg.PeerIdentities, err = peerIdentitiesEnv("DGP_PEER_IDENTITIES")
+	if err != nil {
+		return Config{}, err
+	}
+
 	if cfg.HandshakeTimeout, err = durationEnv("DGP_HANDSHAKE_TIMEOUT", cfg.HandshakeTimeout); err != nil {
 		return Config{}, err
 	}
@@ -101,6 +112,36 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func peerIdentitiesEnv(name string) (map[[staticKeySize]byte]string, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return nil, ErrPeerIdentitiesRequired
+	}
+	entries := make(map[[staticKeySize]byte]string)
+	principals := make(map[string]struct{})
+	for _, entry := range strings.Split(value, ",") {
+		parts := strings.Split(entry, "=")
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.TrimSpace(entry) != entry {
+			return nil, fmt.Errorf("config: %s contains a malformed identity entry", name)
+		}
+		decoded, err := hex.DecodeString(parts[0])
+		if err != nil || len(decoded) != staticKeySize {
+			return nil, fmt.Errorf("config: %s contains an invalid Noise public key", name)
+		}
+		var key [staticKeySize]byte
+		copy(key[:], decoded)
+		if _, exists := entries[key]; exists {
+			return nil, fmt.Errorf("config: %s contains a duplicate Noise public key", name)
+		}
+		if _, exists := principals[parts[1]]; exists {
+			return nil, fmt.Errorf("config: %s contains a duplicate principal", name)
+		}
+		entries[key] = parts[1]
+		principals[parts[1]] = struct{}{}
+	}
+	return entries, nil
 }
 
 func envOr(key, fallback string) string {

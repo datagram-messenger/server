@@ -11,7 +11,7 @@ The normative wire protocol is documented in [`docs/protocol/dgp-v1.md`](docs/pr
 
 ## Configure the server
 
-`DGP_STATIC_KEY` is required and must contain exactly 32 bytes encoded as 64 hexadecimal characters. Generate it once per server identity, store it in a secret manager, and reuse it across restarts. Do not commit it, paste it into logs, or use the examples below as production key material.
+`DGP_STATIC_KEY` is required and must contain exactly 32 bytes encoded as 64 hexadecimal characters. `DGP_PEER_IDENTITIES` is also required and is a comma-separated allowlist of `<64-hex Noise static public key>=<principal>` entries. Unknown peers are rejected; there is no permissive production default. Keys and principals must be non-empty and unique, and whitespace is not accepted. Generate it once per server identity, store it in a secret manager, and reuse it across restarts. Do not commit it, paste it into logs, or use the examples below as production key material.
 
 ### Windows PowerShell
 
@@ -47,7 +47,7 @@ export DGP_STATIC_KEY='<64-hex-character-secret>'
 | `DGP_STATIC_KEY` | Yes | — | Exactly 64 hex characters (32 decoded bytes). |
 | `DGP_ADDRESS` | No | `:8090` | TCP listen address accepted by Go `net.Listen`. |
 | `DGP_HANDSHAKE_TIMEOUT` | No | `10s` | Positive Go duration. |
-| `DGP_READ_TIMEOUT` | No | `30s` | Positive Go duration; per-frame read deadline. |
+| `DGP_READ_TIMEOUT` | No | `0` | Positive Go duration; per-frame read deadline. |
 | `DGP_WRITE_TIMEOUT` | No | `10s` | Positive Go duration; per-frame write deadline and graceful-close allowance. |
 | `DGP_IDLE_TIMEOUT` | No | `2m` | Positive Go duration; closes a connection after no authenticated inbound frames. |
 | `DGP_KEEPALIVE_INTERVAL` | No | `30s` | Positive Go duration; interval for encrypted Ping frames. |

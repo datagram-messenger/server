@@ -9,6 +9,7 @@ import (
 
 func TestLoad(t *testing.T) {
 	t.Setenv("DGP_STATIC_KEY", strings.Repeat("01", 32))
+	t.Setenv("DGP_PEER_IDENTITIES", strings.Repeat("02", 32)+"=alice")
 	t.Setenv("DGP_ADDRESS", "127.0.0.1:9000")
 	t.Setenv("DGP_IDLE_TIMEOUT", "45s")
 	t.Setenv("DGP_KEEPALIVE_INTERVAL", "15s")
@@ -37,8 +38,48 @@ func TestLoadRequiresStaticKey(t *testing.T) {
 
 func TestLoadRejectsInvalidValues(t *testing.T) {
 	t.Setenv("DGP_STATIC_KEY", strings.Repeat("01", 32))
+	t.Setenv("DGP_PEER_IDENTITIES", strings.Repeat("02", 32)+"=alice")
 	t.Setenv("DGP_READ_TIMEOUT", "never")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected invalid duration error")
+	}
+}
+
+func TestLoadPeerIdentities(t *testing.T) {
+	t.Setenv("DGP_STATIC_KEY", strings.Repeat("01", 32))
+	t.Setenv("DGP_PEER_IDENTITIES", strings.Repeat("02", 32)+"=alice,"+strings.Repeat("03", 32)+"=bob")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var key [32]byte
+	for i := range key {
+		key[i] = 2
+	}
+	if got := cfg.PeerIdentities[key]; got != "alice" {
+		t.Fatalf("principal = %q", got)
+	}
+}
+
+func TestLoadRequiresPeerIdentities(t *testing.T) {
+	t.Setenv("DGP_STATIC_KEY", strings.Repeat("01", 32))
+	t.Setenv("DGP_PEER_IDENTITIES", "")
+	_, err := Load()
+	if !errors.Is(err, ErrPeerIdentitiesRequired) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadRejectsInvalidPeerIdentities(t *testing.T) {
+	key := strings.Repeat("02", 32)
+	tests := []string{"bad", "=alice", key + "=", "zz=alice", key + "=alice," + key + "=bob", key + "=alice," + strings.Repeat("03", 32) + "=alice", key + "=alice,"}
+	for _, value := range tests {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("DGP_STATIC_KEY", strings.Repeat("01", 32))
+			t.Setenv("DGP_PEER_IDENTITIES", value)
+			if _, err := Load(); err == nil {
+				t.Fatal("expected error")
+			}
+		})
 	}
 }

@@ -85,6 +85,14 @@ func handleInfo(ctx *dgpserver.Context, message *dgpv1.EncryptedData) error {
 	})
 }
 
+func newAuthenticator(identities map[[32]byte]string) dgpserver.Authenticator {
+	entries := make(map[[32]byte]dgpserver.Principal, len(identities))
+	for key, principal := range identities {
+		entries[key] = principal
+	}
+	return dgpserver.NewStaticKeyAllowlist(entries)
+}
+
 func newServer(cfg config.Config, logger *slog.Logger) (*dgpserver.Server, error) {
 	if logger == nil {
 		return nil, errors.New("api_datagram: nil logger")
@@ -116,10 +124,7 @@ func newServer(cfg config.Config, logger *slog.Logger) (*dgpserver.Server, error
 			MaxConcurrentHandshakes: cfg.MaxConcurrentHandshakes,
 			MaxActiveConnections:    cfg.MaxActiveConnections,
 		},
-		Authenticator: dgpserver.AuthenticatorFunc(func(context.Context, dgpserver.Credentials) (dgpserver.Principal, error) {
-			// Noise XX has already authenticated possession of the peer static key.
-			return "noise-peer", nil
-		}),
+		Authenticator: newAuthenticator(cfg.PeerIdentities),
 		ErrorHandler: func(_ *dgpserver.Context, err error) error {
 			if errors.Is(err, dgpserver.ErrNotHandled) {
 				logger.Warn("application message not handled")

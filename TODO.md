@@ -334,7 +334,7 @@ Audit basis: `HEAD` `903fd10`, the current `pkg/dgpserver`, `pkg/dgpv1`, and `cm
   - [x] A static-key allowlist adapter exists.
   - [x] Ensure connect rejection/panic triggers exactly one disconnect hook after active state registration.
   - [ ] Complete terminal-cause precedence and the remaining abnormal disconnect matrix.
-  - [ ] Define and enforce production authorization and identity mapping; `cmd/api_datagram` currently maps every cryptographically valid Noise peer to the constant principal `"noise-peer"`.
+  - [x] Define and enforce production authorization and identity mapping; `cmd/api_datagram` requires a fail-closed Noise static-key allowlist with unique principals.
 - [ ] Complete lifecycle tests for freeze races, the one-`Serve` rule, cancellation, connect rejection/panic, every disconnect path, and shutdown deadline escalation.
   - [x] Real-TCP tests cover authenticate → connect → typed route/response → disconnect, connect rejection/panic isolation, exactly-once disconnect on the normal path, and shutdown escalation.
   - [ ] Add race-tested freeze/mutation, repeated/concurrent `Serve`, root-cancellation outcomes, and an exhaustive abnormal-exit/disconnect matrix.
