@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tr1xdev/datagram-server.git/internal/buildinfo"
 	"github.com/tr1xdev/datagram-server.git/internal/config"
 	"github.com/tr1xdev/datagram-server.git/pkg/dgpserver"
 	"github.com/tr1xdev/datagram-server.git/pkg/dgpv1"
@@ -29,7 +30,12 @@ const (
 
 func main() {
 	configPath := flag.String("config", "", "path to YAML configuration file")
+	showVersion := flag.Bool("version", false, "print version metadata and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(buildinfo.String())
+		return
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

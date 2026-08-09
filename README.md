@@ -109,3 +109,16 @@ Send an interrupt (`Ctrl+C`) or `SIGTERM`. The server stops accepting connection
 The current server supports TCP, Noise XX in exactly three flights, ChaCha20-Poly1305 data frames, rekeying, replay protection, encrypted Ping/Pong keepalives, and idle close.
 
 The following are preserved as post-MVP design history only and are **not implemented, negotiated, or required**: QUIC transport, transport obfuscation, Noise IK, resumption tickets, and 0-RTT. AES-256-GCM exists as a library codec option but the launch entrypoint selects ChaCha20-Poly1305 and exposes no cipher negotiation setting.
+
+## Releases
+
+Pushing a strict semantic-version tag such as `v1.2.3` runs the release delivery workflow. After tests, vet, and a production-command build, it cross-compiles only the runnable `api_datagram` service for Linux amd64/arm64, Windows amd64, and macOS amd64/arm64 with CGO disabled. Each archive includes `LICENSE`, `README.md`, and `config.example.yaml`; `SHA256SUMS` covers every archive. A GitHub Release is created only for a tag. Manual workflow runs are build-only and retain artifacts for 14 days.
+
+Reproduce the archive set locally from a POSIX shell with Go, Git, tar, gzip, and sha256sum available:
+
+```sh
+./scripts/build-release.sh --output ./dist --version v1.2.3
+(cd dist && sha256sum --check SHA256SUMS)
+```
+
+Release binaries report injected version, commit, and UTC source-commit date with `api_datagram -version`. Placeholder commands are intentionally excluded. This workflow delivers release artifacts; it does not deploy to production because no target infrastructure is defined.

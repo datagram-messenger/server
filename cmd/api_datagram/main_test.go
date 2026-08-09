@@ -8,10 +8,18 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/tr1xdev/datagram-server.git/internal/buildinfo"
 	"github.com/tr1xdev/datagram-server.git/internal/config"
 	"github.com/tr1xdev/datagram-server.git/pkg/dgpserver"
 	"github.com/tr1xdev/datagram-server.git/pkg/dgpv1"
 )
+
+func TestVersionMetadata(t *testing.T) {
+	got := buildinfo.String()
+	if got == "" {
+		t.Fatal("version metadata is empty")
+	}
+}
 
 func TestCommandRouterRegistration(t *testing.T) {
 	router, err := newCommandRouter()

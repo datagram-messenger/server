@@ -812,3 +812,11 @@ Features intentionally deferred from the first slice:
 - [x] Add govulncheck and fork-safe, read-only secret scanning.
 - [x] Document the coverage scope, threshold, artifacts, and action update policy.
 - [ ] Add continuous deployment only after the deployment target and release policy are defined.
+
+## Release delivery pipeline
+
+- [x] Add a tag-only GitHub Release workflow with strict `vMAJOR.MINOR.PATCH` validation and least privileges.
+- [x] Cross-compile only the runnable `api_datagram` service for the supported Linux, Windows, and macOS targets.
+- [x] Produce documented archives and mandatory `SHA256SUMS` through the locally reproducible release script.
+- [x] Expose and test release version metadata through `-version`.
+- [ ] Define target infrastructure, operational ownership, and credentials before adding any production deployment.
