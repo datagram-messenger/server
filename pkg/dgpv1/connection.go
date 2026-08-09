@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -73,6 +74,9 @@ type Connection struct {
 	startOnce    sync.Once
 	shutdownOnce sync.Once
 	closeOnce    sync.Once
+	causeMu      sync.Mutex
+	terminal     error
+	terminalRank uint8
 	started      atomic.Bool
 	closing      atomic.Bool
 	pingNonce    atomic.Uint64
@@ -229,8 +233,14 @@ func (c *Connection) Close() error {
 // Done closes after all runtime loops exit.
 func (c *Connection) Done() <-chan struct{} { return c.done }
 
-// Err returns the terminal cause, or nil while running.
-func (c *Connection) Err() error { return context.Cause(c.ctx) }
+// Err returns the terminal cause, or nil while running. When termination signals
+// race, handler panics take precedence over handler errors, transport/protocol
+// errors, local or context cancellation, and ordinary EOF, in that order.
+func (c *Connection) Err() error {
+	c.causeMu.Lock()
+	defer c.causeMu.Unlock()
+	return c.terminal
+}
 
 func (c *Connection) closeGracefully(message SessionClose, cause error) error {
 	var result error
@@ -270,12 +280,48 @@ func (c *Connection) shutdown(cause error) {
 	if cause == nil {
 		cause = ErrConnectionClosed
 	}
+	c.recordTerminal(cause)
 	c.shutdownOnce.Do(func() {
 		c.closing.Store(true)
 		c.cancel(cause)
 		_ = c.session.Close()
 		_ = c.transport.Close()
 	})
+}
+
+func (c *Connection) recordTerminal(cause error) {
+	c.recordTerminalWithRank(cause, terminalCauseRank(cause))
+}
+
+func (c *Connection) recordTerminalWithRank(cause error, rank uint8) {
+	if errors.Is(cause, ErrHandlerPanic) {
+		rank = 5
+	}
+	c.causeMu.Lock()
+	if rank > c.terminalRank {
+		c.terminal, c.terminalRank = cause, rank
+	}
+	c.causeMu.Unlock()
+}
+
+func terminalCauseRank(cause error) uint8 {
+	switch {
+	case errors.Is(cause, ErrHandlerPanic):
+		return 5
+	case cause != nil && !errors.Is(cause, io.EOF) && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) && !errors.Is(cause, ErrConnectionClosed):
+		return 3
+	case errors.Is(cause, ErrConnectionClosed), errors.Is(cause, context.Canceled), errors.Is(cause, context.DeadlineExceeded):
+		return 2
+	default:
+		return 1
+	}
+}
+
+func handlerCauseRank(cause error) uint8 {
+	if errors.Is(cause, ErrHandlerPanic) {
+		return 5
+	}
+	return 4
 }
 
 // abort force-closes network I/O without waiting for the graceful close path.
@@ -485,6 +531,7 @@ func (c *Connection) handlerLoop() {
 			default:
 			}
 			if err := c.callHandler(message); err != nil {
+				c.recordTerminalWithRank(err, handlerCauseRank(err))
 				c.shutdown(err)
 				return
 			}

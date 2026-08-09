@@ -55,11 +55,13 @@ type ErrorHandler func(*Context, error) error
 
 // Config configures a production high-level server.
 type Config struct {
-	DGP               dgpv1.ServerConfig
-	Router            *Router
-	Authenticator     Authenticator
-	ErrorHandler      ErrorHandler
-	OnConnect         func(context.Context, ConnectionInfo) error
+	DGP           dgpv1.ServerConfig
+	Router        *Router
+	Authenticator Authenticator
+	ErrorHandler  ErrorHandler
+	OnConnect     func(context.Context, ConnectionInfo) error
+	// OnDisconnect runs exactly once for every connection that reaches active
+	// registration. Its cause follows dgpv1 terminal-cause precedence.
 	OnDisconnect      func(context.Context, ConnectionInfo, error)
 	DisconnectTimeout time.Duration
 }

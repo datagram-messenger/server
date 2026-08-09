@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,5 +82,35 @@ func TestCloseAndShutdownBeforeServeAreIdempotent(t *testing.T) {
 	}
 	if err := server.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDisconnectedConsumesStateExactlyOnce(t *testing.T) {
+	var calls atomic.Int32
+	got := make(chan error, 1)
+	server, err := New(Config{OnDisconnect: func(_ context.Context, _ ConnectionInfo, cause error) {
+		calls.Add(1)
+		got <- cause
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := new(dgpv1.Connection)
+	server.states.Store(conn, connectionState{})
+	cause := errors.New("terminal")
+	start := make(chan struct{})
+	var callers sync.WaitGroup
+	for range 16 {
+		callers.Add(1)
+		go func() {
+			defer callers.Done()
+			<-start
+			server.disconnected(context.Background(), conn, dgpv1.AdmissionInfo{}, cause)
+		}()
+	}
+	close(start)
+	callers.Wait()
+	if calls.Load() != 1 || !errors.Is(<-got, cause) {
+		t.Fatalf("calls=%d", calls.Load())
 	}
 }
