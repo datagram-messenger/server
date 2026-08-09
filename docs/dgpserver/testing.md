@@ -72,3 +72,23 @@ Use real loopback TCP and a `dgpv1` client for:
 - rekey, replay, malformed input, and other protocol behavior.
 
 Keep integration tests deterministic with explicit synchronization and deadlines. The package's [`runtime_integration_test.go`](../../pkg/dgpserver/runtime_integration_test.go) demonstrates a full handshake, authenticated dispatch, response, and shutdown.
+
+## Dispatch benchmarks
+
+Run the deterministic, network- and crypto-free dispatch benchmarks from the repository root:
+
+```sh
+go test ./pkg/dgpserver -run '^$' -bench '^BenchmarkDispatchOverhead$' -benchmem -count=1
+```
+
+Baseline recorded on Windows/amd64 with Go 1.26.5 and an Intel Xeon E5-2689 0 @ 2.60 GHz:
+
+```text
+BenchmarkDispatchOverhead/Handler-16                           2.034 ns/op     0 B/op   0 allocs/op
+BenchmarkDispatchOverhead/DispatchHelper-16                  197.1 ns/op     192 B/op   2 allocs/op
+BenchmarkDispatchOverhead/FrozenTypedRouter-16                92.66 ns/op     0 B/op   0 allocs/op
+BenchmarkDispatchOverhead/FrozenTypedRouterWithMiddleware-16 101.3 ns/op     0 B/op   0 allocs/op
+BenchmarkDispatchOverhead/FrozenCommandRouter-16               46.49 ns/op     0 B/op   0 allocs/op
+```
+
+These numbers are machine- and toolchain-specific reference data, not a release threshold. Compare changes using repeated runs on the same controlled host; investigate evidence before optimizing implementation code.
