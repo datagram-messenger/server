@@ -318,10 +318,12 @@ Audit basis: `HEAD` `903fd10`, the current `pkg/dgpserver`, `pkg/dgpv1`, and `cm
 
 - [ ] Complete handler types, typed adapters, frozen routing, command routing/groups, middleware compilation, `Context`, immutable metadata, recorder, and dispatch helper.
   - [x] Handler/middleware types, closed-set typed registration, frozen DGP routing, narrow `Context`, defensive snapshots, and a bounded recorder are implemented.
-  - [ ] Add the codec-neutral SDK command router/groups and contract-level dispatch helper; reconcile remaining API/error-policy differences.
+  - [x] Add the codec-neutral SDK command router/groups.
+  - [ ] Add the contract-level dispatch helper and reconcile remaining API/error-policy differences.
 - [ ] Complete unit coverage for duplicates, wrong generic forms, middleware order/short-circuit, decoder failures, panic recovery, ownership, and send semantics.
   - [x] Tests cover DGP-route duplication/type form, freeze behavior, middleware order/short-circuit, panic conversion, defensive copying, recorder bounds/cancellation, and low-level queue/write semantics.
-  - [ ] Add decoder/group coverage after command routing exists, plus explicit coverage for middleware calling `next` twice and reconciled API semantics.
+  - [x] Add decoder/group coverage for command routing.
+  - [ ] Add explicit coverage for middleware calling `next` twice and reconciled API semantics.
 
 **Acceptance:** typed DGP handlers and in-memory tests work without crypto/network, but the command-router API and compile-only examples are missing.
 
