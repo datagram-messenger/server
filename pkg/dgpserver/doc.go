@@ -13,6 +13,8 @@
 // underlying connection or cryptographic state. Dispatch and Recorder support
 // unit tests without TCP or Noise.
 //
-// See ../../docs/dgpserver/README.md in the repository for the developer guide,
-// practical quickstart, operational caveats, and testing examples.
+// A minimal package example in example_test.go demonstrates typed
+// EncryptedData routing and an echo response with Recorder. See
+// ../../docs/dgpserver/README.md in the repository for the complete server
+// quickstart, operational caveats, and additional testing examples.
 package dgpserver

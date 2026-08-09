@@ -12,7 +12,7 @@ Use this guide when building a service on DGPv1. Read the [normative protocol sp
 4. [Lifecycle, errors, and operations](lifecycle-and-errors.md) — hooks, graceful shutdown, panic policy, limits, and production caveats.
 5. [Testing handlers](testing.md) — test with `Dispatch` and `Recorder` without TCP or cryptography.
 
-The package's compiling examples are in [`example_test.go`](../../pkg/dgpserver/example_test.go). The runnable `api_datagram` service is a larger integration example in [`cmd/api_datagram`](../../cmd/api_datagram/main.go).
+The package's minimal compile-tested echo example and focused API examples are in [`example_test.go`](../../pkg/dgpserver/example_test.go). The package example uses `Recorder`, so it demonstrates typed routing and the reply without opening a socket; use the [quickstart](quickstart.md) for complete server construction and shutdown. The runnable `api_datagram` service is a larger integration example in [`cmd/api_datagram`](../../cmd/api_datagram/main.go).
 
 ## Mental model
 

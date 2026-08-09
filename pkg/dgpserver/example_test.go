@@ -11,6 +11,29 @@ import (
 	"github.com/tr1xdev/datagram-server/pkg/dgpv1"
 )
 
+func Example() {
+	recorder := dgpserver.NewRecorder(1)
+	ctx := recorder.NewContext(context.Background(), dgpserver.Peer{}, dgpserver.Metadata{}, dgpserver.Params{})
+
+	var router dgpserver.Router
+	if err := router.HandleEncryptedData(func(ctx *dgpserver.Context, message *dgpv1.EncryptedData) error {
+		return ctx.TrySend(&dgpv1.EncryptedData{
+			StreamID:       message.StreamID,
+			AppMessageType: message.AppMessageType,
+			Fields:         message.Fields,
+		})
+	}); err != nil {
+		panic(err)
+	}
+	if err := router.Dispatch(ctx, &dgpv1.EncryptedData{StreamID: 7, AppMessageType: 1}); err != nil {
+		panic(err)
+	}
+
+	reply := recorder.Snapshot()[0].Message.(*dgpv1.EncryptedData)
+	fmt.Println(reply.StreamID, reply.AppMessageType)
+	// Output: 7 1
+}
+
 func ExampleRouter_HandleEncryptedData() {
 	var router dgpserver.Router
 	if err := router.HandleEncryptedData(func(_ *dgpserver.Context, message *dgpv1.EncryptedData) error {
