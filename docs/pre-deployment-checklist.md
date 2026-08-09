@@ -337,7 +337,7 @@ git status --short
 
 ## 16. Release artifact verification
 
-- [ ] Run `./scripts/build-release.sh --output ./dist --version vMAJOR.MINOR.PATCH` from a clean checkout.
+- [ ] Run `make release VERSION=vMAJOR.MINOR.PATCH DIST_DIR=dist` from a clean checkout.
 - [ ] Run `(cd dist && sha256sum --check SHA256SUMS)` and require every archive to pass.
 - [ ] Confirm each archive contains only `api_datagram` (or `api_datagram.exe`), `LICENSE`, `README.md`, and `config.example.yaml` under its versioned directory.
 - [ ] Run the host-compatible binary with `-version` and confirm version, full commit SHA, and UTC build date.

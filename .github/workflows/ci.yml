@@ -93,7 +93,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
       - name: Check coverage threshold
-        run: ./scripts/check-coverage.sh 85 coverage.out
+        run: make coverage COVERAGE_THRESHOLD=85 COVERAGE_PROFILE=coverage.out
       - name: Upload coverage profile
         if: always()
         uses: actions/upload-artifact@v4

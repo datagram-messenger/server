@@ -96,7 +96,7 @@ On success, the server logs its bound TCP address. The default is all interfaces
 
 GitHub Actions runs formatting, module tidiness/verification, vet, builds every command, unit/integration tests, the Linux race detector, coverage, golangci-lint, govulncheck, and repository-history secret scanning for pushes and pull requests to `main`. The workflow has read-only repository permissions and does not pass secrets to pull-request code.
 
-Coverage measures `./internal/...` and `./pkg/...` at an 85% minimum; command entrypoints are transparently excluded because they are wiring or placeholders. Run the same check on a POSIX shell with `./scripts/check-coverage.sh`. The generated `coverage.out` is uploaded for 14 days.
+Coverage measures `./internal/...` and `./pkg/...` at an 85% minimum; command entrypoints are transparently excluded because they are wiring or placeholders. Run the same check on Ubuntu with GNU Make using `make coverage`; override settings with `COVERAGE_THRESHOLD` and `COVERAGE_PROFILE`. The generated `coverage.out` is uploaded for 14 days.
 
 Actions use stable major tags because verified commit SHAs are not maintained in this repository. Dependabot checks GitHub Actions monthly; review and merge those updates to keep pins current.
 
@@ -114,11 +114,13 @@ The following are preserved as post-MVP design history only and are **not implem
 
 Pushing a strict semantic-version tag such as `v1.2.3` runs the release delivery workflow. After tests, vet, and a production-command build, it cross-compiles only the runnable `api_datagram` service for Linux amd64/arm64, Windows amd64, and macOS amd64/arm64 with CGO disabled. Each archive includes `LICENSE`, `README.md`, and `config.example.yaml`; `SHA256SUMS` covers every archive. A GitHub Release is created only for a tag. Manual workflow runs are build-only and retain artifacts for 14 days.
 
-Reproduce the archive set locally from a POSIX shell with Go, Git, tar, gzip, and sha256sum available:
+Reproduce the archive set locally on Ubuntu with GNU Make, Go, Git, tar, gzip, and sha256sum available:
 
 ```sh
-./scripts/build-release.sh --output ./dist --version v1.2.3
-(cd dist && sha256sum --check SHA256SUMS)
+make release VERSION=v1.2.3 DIST_DIR=dist
+make verify-release DIST_DIR=dist
 ```
+
+Set `SOURCE_DATE_EPOCH` to reproduce artifacts with an explicit Unix timestamp; otherwise the source commit timestamp is used.
 
 Release binaries report injected version, commit, and UTC source-commit date with `api_datagram -version`. Placeholder commands are intentionally excluded. This workflow delivers release artifacts; it does not deploy to production because no target infrastructure is defined.

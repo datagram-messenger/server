@@ -44,7 +44,7 @@ jobs:
       - run: go mod verify
       - run: go test ./...
       - run: go vet ./...
-      - run: go build ./cmd/api_datagram
+      - run: make build
 
   build:
     name: Cross-compile release artifacts
@@ -62,10 +62,9 @@ jobs:
       - name: Build archives and checksums
         env:
           VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
-        run: ./scripts/build-release.sh --output dist --version "$VERSION"
+        run: make release VERSION="$VERSION" DIST_DIR=dist
       - name: Verify checksums
-        working-directory: dist
-        run: sha256sum --check SHA256SUMS
+        run: make verify-release DIST_DIR=dist
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:

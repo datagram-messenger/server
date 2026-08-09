@@ -12,16 +12,10 @@ Excluded: JSON serialization, network I/O, sockets, HTTP library behavior, TLS r
 
 ## Reproduction
 
-Windows:
-
-```powershell
-./scripts/run-benchmarks.ps1 -Benchtime 1s -Count 5
-```
-
-Linux/macOS:
+On Ubuntu with GNU Make:
 
 ```sh
-./scripts/run-benchmarks.sh 1s 5
+make benchmark BENCHTIME=1s COUNT=5
 ```
 
 The runners record ignored machine-specific raw output under `benchmarks/results/`. Compare all repetitions and medians; rerun on the target CPU with a quiet machine, fixed power policy, and unchanged Go version before making claims.
