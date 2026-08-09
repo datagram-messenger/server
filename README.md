@@ -1,5 +1,7 @@
 # DGPv1 Datagram Server
 
+[![Go CI](https://github.com/tr1xdev/datagram-server/actions/workflows/ci.yml/badge.svg)](https://github.com/tr1xdev/datagram-server/actions/workflows/ci.yml)
+
 Go implementation of the current DGPv1 MVP: a TCP server with a three-flight `Noise_XX_25519_ChaChaPoly_SHA256` handshake, encrypted DGPv1 sessions, replay protection, directional rekeying, keepalives, idle close, and graceful process shutdown.
 
 The normative wire protocol is documented in [`docs/protocol/dgp-v1.md`](docs/protocol/dgp-v1.md). Before a release, follow the [`DGPv1 pre-deployment checklist`](docs/pre-deployment-checklist.md).
@@ -89,6 +91,14 @@ DGP_ADDRESS=127.0.0.1:9090 go run ./cmd/api_datagram -config ./config.yaml
 ```
 
 On success, the server logs its bound TCP address. The default is all interfaces on port `8090`; set `DGP_ADDRESS=127.0.0.1:8090` to listen only on the local machine.
+
+## Continuous integration
+
+GitHub Actions runs formatting, module tidiness/verification, vet, builds every command, unit/integration tests, the Linux race detector, coverage, golangci-lint, govulncheck, and repository-history secret scanning for pushes and pull requests to `main`. The workflow has read-only repository permissions and does not pass secrets to pull-request code.
+
+Coverage measures `./internal/...` and `./pkg/...` at an 85% minimum; command entrypoints are transparently excluded because they are wiring or placeholders. Run the same check on a POSIX shell with `./scripts/check-coverage.sh`. The generated `coverage.out` is uploaded for 14 days.
+
+Actions use stable major tags because verified commit SHAs are not maintained in this repository. Dependabot checks GitHub Actions monthly; review and merge those updates to keep pins current.
 
 ## Shutdown behavior
 

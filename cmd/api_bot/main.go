@@ -1,3 +1,4 @@
 package main
 
-// bot api svc
+// main is a placeholder until the bot service entrypoint is implemented.
+func main() {}

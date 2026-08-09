@@ -805,3 +805,10 @@ Features intentionally deferred from the first slice:
 ## Configuration series
 - [x] Add the typed Viper loader and fully migrate api_datagram.
 - [ ] Migrate api_bot, auth, and user when those command entrypoints gain runtime configuration.
+
+## CI quality series
+- [x] Add reproducible GitHub Actions checks for formatting, modules, vet, build, tests, race detection, and coverage.
+- [x] Add focused golangci-lint configuration.
+- [x] Add govulncheck and fork-safe, read-only secret scanning.
+- [x] Document the coverage scope, threshold, artifacts, and action update policy.
+- [ ] Add continuous deployment only after the deployment target and release policy are defined.
