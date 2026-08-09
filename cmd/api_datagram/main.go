@@ -26,14 +26,6 @@ const (
 	shutdownTimeout = 10 * time.Second
 )
 
-var errUnknownCommand = errors.New("api_datagram: unknown application command")
-
-type commandHandler func(*dgpserver.Context, *dgpv1.EncryptedData) error
-
-type commandRouter struct {
-	handlers map[uint8]commandHandler
-}
-
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -44,39 +36,30 @@ func main() {
 	}
 }
 
-func newCommandRouter() (*commandRouter, error) {
-	router := &commandRouter{handlers: make(map[uint8]commandHandler, 2)}
+func newCommandRouter() (*dgpserver.CommandRouter, error) {
+	commands := dgpserver.NewCommandRouter(dgpserver.CommandDecoderFunc(func(message *dgpv1.EncryptedData) (dgpserver.Command, any, error) {
+		return dgpserver.Command(message.AppMessageType), message, nil
+	}))
 	for _, route := range []struct {
-		command uint8
-		handler commandHandler
+		command dgpserver.Command
+		handler dgpserver.TypedHandlerFunc[dgpv1.EncryptedData]
 	}{
-		{appMessageTypeEcho, handleEcho},
-		{appMessageTypeInfo, handleInfo},
+		{dgpserver.Command(appMessageTypeEcho), handleEcho},
+		{dgpserver.Command(appMessageTypeInfo), handleInfo},
 	} {
-		if err := router.handle(route.command, route.handler); err != nil {
+		handler := route.handler
+		err := commands.Handle(route.command, dgpserver.HandlerFunc(func(ctx *dgpserver.Context, payload any) error {
+			message, ok := payload.(*dgpv1.EncryptedData)
+			if !ok {
+				return dgpserver.ErrInvalidMessageForm
+			}
+			return handler(ctx, message)
+		}))
+		if err != nil {
 			return nil, err
 		}
 	}
-	return router, nil
-}
-
-func (r *commandRouter) handle(command uint8, handler commandHandler) error {
-	if handler == nil {
-		return fmt.Errorf("api_datagram: nil handler for command 0x%02x", command)
-	}
-	if _, exists := r.handlers[command]; exists {
-		return fmt.Errorf("api_datagram: duplicate command 0x%02x", command)
-	}
-	r.handlers[command] = handler
-	return nil
-}
-
-func (r *commandRouter) dispatch(ctx *dgpserver.Context, message *dgpv1.EncryptedData) error {
-	handler := r.handlers[message.AppMessageType]
-	if handler == nil {
-		return fmt.Errorf("%w: 0x%02x", errUnknownCommand, message.AppMessageType)
-	}
-	return handler(ctx, message)
+	return commands, nil
 }
 
 func handleEcho(ctx *dgpserver.Context, message *dgpv1.EncryptedData) error {
@@ -138,7 +121,7 @@ func newServer(cfg config.Config, logger *slog.Logger) (*dgpserver.Server, error
 			return "noise-peer", nil
 		}),
 		ErrorHandler: func(_ *dgpserver.Context, err error) error {
-			if errors.Is(err, errUnknownCommand) || errors.Is(err, dgpserver.ErrNotHandled) {
+			if errors.Is(err, dgpserver.ErrNotHandled) {
 				logger.Warn("application message not handled")
 				return nil
 			}
@@ -157,7 +140,7 @@ func newServer(cfg config.Config, logger *slog.Logger) (*dgpserver.Server, error
 	if err != nil {
 		return nil, fmt.Errorf("create server: %w", err)
 	}
-	if err := dgpserver.RegisterTyped[dgpv1.EncryptedData](server.Router(), commands.dispatch); err != nil {
+	if err := dgpserver.RegisterTyped[dgpv1.EncryptedData](server.Router(), commands.Handler()); err != nil {
 		return nil, fmt.Errorf("register application routes: %w", err)
 	}
 	return server, nil

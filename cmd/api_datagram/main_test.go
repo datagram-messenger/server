@@ -18,26 +18,8 @@ func TestCommandRouterRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []uint8{appMessageTypeEcho, appMessageTypeInfo} {
-		if router.handlers[command] == nil {
-			t.Errorf("command 0x%02x is not registered", command)
-		}
-	}
-
-	tests := []struct {
-		name    string
-		command uint8
-		handler commandHandler
-	}{
-		{name: "duplicate", command: appMessageTypeEcho, handler: handleEcho},
-		{name: "nil handler", command: 0xfe, handler: nil},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if err := router.handle(tt.command, tt.handler); err == nil {
-				t.Fatal("registration succeeded, want error")
-			}
-		})
+	if router == nil || router.Handler() == nil {
+		t.Fatal("command router was not configured")
 	}
 }
 
@@ -79,7 +61,7 @@ func TestCommandHandlers(t *testing.T) {
 			}
 			recorder := dgpserver.NewRecorder(1)
 			ctx := recorder.NewContext(context.Background(), dgpserver.Peer{}, dgpserver.Metadata{}, dgpserver.Params{})
-			if err := router.dispatch(ctx, tt.request); err != nil {
+			if err := router.Handler()(ctx, tt.request); err != nil {
 				t.Fatal(err)
 			}
 			items := recorder.Snapshot()
@@ -109,9 +91,9 @@ func TestCommandRouterUnknownCommand(t *testing.T) {
 	}
 	recorder := dgpserver.NewRecorder(1)
 	ctx := recorder.NewContext(context.Background(), dgpserver.Peer{}, dgpserver.Metadata{}, dgpserver.Params{})
-	err = router.dispatch(ctx, &dgpv1.EncryptedData{AppMessageType: 0xff})
-	if !errors.Is(err, errUnknownCommand) {
-		t.Fatalf("dispatch error = %v, want %v", err, errUnknownCommand)
+	err = router.Handler()(ctx, &dgpv1.EncryptedData{AppMessageType: 0xff})
+	if !errors.Is(err, dgpserver.ErrNotHandled) {
+		t.Fatalf("dispatch error = %v, want %v", err, dgpserver.ErrNotHandled)
 	}
 	if recorder.Len() != 0 {
 		t.Fatal("unknown command sent a response")

@@ -344,7 +344,7 @@ Audit basis: `HEAD` `903fd10`, the current `pkg/dgpserver`, `pkg/dgpv1`, and `cm
 
 - [x] Migrate `cmd/api_datagram` to `pkg/dgpserver` without changing protocol behavior.
   - [x] It uses `dgpserver.New`, typed `EncryptedData` registration, SDK lifecycle/auth/error hooks, and graceful shutdown; the former DGP type assertion/switch is gone.
-  - [ ] Application commands still use a local `AppMessageType` map; migrate it after the SDK command router exists.
+  - [x] Application commands use the codec-neutral SDK command router; the local `AppMessageType` map was removed.
 - [ ] Add echo, authenticated, command-router, middleware, graceful-shutdown, and migration examples.
   - [x] `cmd/api_datagram` is a tested service-migration example with echo/info handlers and graceful shutdown.
   - [ ] Add standalone compiled examples, especially allowlist authentication, SDK command groups, and middleware.
