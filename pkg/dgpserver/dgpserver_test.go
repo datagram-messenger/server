@@ -159,6 +159,33 @@ func TestMiddlewareOrderShortCircuitAndSingleCompilation(t *testing.T) {
 	}
 }
 
+func TestMiddlewareMayCallNextMoreThanOnce(t *testing.T) {
+	var router Router
+	var calls int
+	if err := router.Use(func(next Handler) Handler {
+		return HandlerFunc(func(ctx *Context, message any) error {
+			if err := next.Handle(ctx, message); err != nil {
+				return err
+			}
+			return next.Handle(ctx, message)
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RegisterTyped[dgpv1.Ack](&router, func(*Context, *dgpv1.Ack) error {
+		calls++
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := router.Dispatch(nil, &dgpv1.Ack{}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("handler calls = %d, want 2", calls)
+	}
+}
+
 func TestPanicConversion(t *testing.T) {
 	var router Router
 	if err := RegisterTyped[dgpv1.Ack](&router, func(*Context, *dgpv1.Ack) error { panic("boom") }); err != nil {
