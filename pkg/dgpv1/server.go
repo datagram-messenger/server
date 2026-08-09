@@ -21,6 +21,22 @@ var (
 	ErrClientNotPermitted = errors.New("dgpv1: client static key not permitted")
 )
 
+// AdmissionInfo is the non-secret identity and transport metadata available
+// after a successful Noise handshake and before application dispatch.
+type AdmissionInfo struct {
+	PeerStatic [32]byte
+	SessionID  [16]byte
+	RemoteAddr net.Addr
+}
+
+// AdmissionHandler may accept or reject an authenticated connection before it
+// starts. Returning an error closes only that connection.
+type AdmissionHandler func(context.Context, *Connection, AdmissionInfo) error
+
+// DisconnectHandler observes termination of a connection that passed Admission.
+// The supplied context is owned by the caller and may be detached and bounded.
+type DisconnectHandler func(context.Context, *Connection, AdmissionInfo, error)
+
 // ServerConfig configures the runtime parameters and cryptographic settings for a Server.
 type ServerConfig struct {
 	// StaticKey is the server's long-term Noise static key pair.
@@ -65,6 +81,13 @@ type ServerConfig struct {
 
 	// Handler processes authenticated inbound messages received on active connections.
 	Handler MessageHandler
+
+	// Admission runs after Noise authentication and before the connection starts.
+	// It exposes identity metadata but no traffic secrets.
+	Admission AdmissionHandler
+
+	// OnDisconnect runs exactly once after an admitted connection terminates.
+	OnDisconnect DisconnectHandler
 }
 
 // Server accepts incoming TCP connections, completes Noise XX handshakes,
@@ -173,25 +196,10 @@ func (s *Server) Serve(listener net.Listener) error {
 	}
 }
 
-// Close stops accepting new connections and closes all active connections.
+// Close stops accepting new connections, gracefully closes active connections,
+// and waits for all server-owned goroutines. Concurrent calls are safe.
 func (s *Server) Close() error {
-	if s.inShutdown.Swap(true) {
-		return nil
-	}
-	close(s.closed)
-
-	s.mu.Lock()
-	listener := s.listener
-	conns := make([]*Connection, 0, len(s.conns))
-	for conn := range s.conns {
-		conns = append(conns, conn)
-	}
-	handshakeConns := make([]net.Conn, 0, len(s.handshakeConns))
-	for conn := range s.handshakeConns {
-		handshakeConns = append(handshakeConns, conn)
-	}
-	s.mu.Unlock()
-
+	listener, conns, handshakeConns := s.beginShutdown()
 	var err error
 	if listener != nil {
 		err = listener.Close()
@@ -206,11 +214,46 @@ func (s *Server) Close() error {
 	return err
 }
 
+// Abort force-closes listener and network transports without waiting for
+// handlers or disconnect hooks. It is safe to call concurrently with Close and
+// is intended for deadline escalation by a higher-level shutdown coordinator.
+func (s *Server) Abort() error {
+	listener, conns, handshakeConns := s.beginShutdown()
+	var err error
+	if listener != nil {
+		err = listener.Close()
+	}
+	for _, conn := range handshakeConns {
+		_ = conn.Close()
+	}
+	for _, conn := range conns {
+		conn.abort(ErrConnectionClosed)
+	}
+	return err
+}
+
+func (s *Server) beginShutdown() (net.Listener, []*Connection, []net.Conn) {
+	if !s.inShutdown.Swap(true) {
+		close(s.closed)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	conns := make([]*Connection, 0, len(s.conns))
+	for conn := range s.conns {
+		conns = append(conns, conn)
+	}
+	handshakeConns := make([]net.Conn, 0, len(s.handshakeConns))
+	for conn := range s.handshakeConns {
+		handshakeConns = append(handshakeConns, conn)
+	}
+	return s.listener, conns, handshakeConns
+}
+
 func (s *Server) handleConn(netConn net.Conn) {
 	transport := NewTCPTransport(netConn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.HandshakeTimeout)
-	session, err := s.performHandshake(ctx, transport)
+	session, result, err := s.performHandshake(ctx, transport)
 	cancel()
 	s.unregisterHandshake(netConn)
 	s.release(s.handshakes)
@@ -237,6 +280,28 @@ func (s *Server) handleConn(netConn net.Conn) {
 	}
 
 	conn := NewConnection(transport, session, connConfig)
+	if s.config.Admission != nil {
+		admissionCtx, admissionCancel := context.WithTimeout(context.Background(), s.config.HandshakeTimeout)
+		err = callAdmission(s.config.Admission, admissionCtx, conn, AdmissionInfo{
+			PeerStatic: result.PeerStatic,
+			SessionID:  result.SessionID,
+			RemoteAddr: netConn.RemoteAddr(),
+		})
+		admissionCancel()
+		if err != nil {
+			_ = conn.Close()
+			return
+		}
+	}
+	if s.config.OnDisconnect != nil {
+		defer func() {
+			callDisconnect(s.config.OnDisconnect, context.Background(), conn, AdmissionInfo{
+				PeerStatic: result.PeerStatic,
+				SessionID:  result.SessionID,
+				RemoteAddr: netConn.RemoteAddr(),
+			}, conn.Err())
+		}()
+	}
 	if !s.registerConn(conn) {
 		_ = conn.Close()
 		return
@@ -257,62 +322,77 @@ func (s *Server) handleConn(netConn net.Conn) {
 	<-conn.Done()
 }
 
-func (s *Server) performHandshake(ctx context.Context, transport *TCPTransport) (*Session, error) {
+func (s *Server) performHandshake(ctx context.Context, transport *TCPTransport) (*Session, HandshakeResult, error) {
 	responder, err := NewResponderHandshake(s.config.StaticKey, nil)
 	if err != nil {
-		return nil, err
+		return nil, HandshakeResult{}, err
 	}
 
 	frame1, err := transport.ReadFrame(ctx)
 	if err != nil {
-		return nil, err
+		return nil, HandshakeResult{}, err
 	}
 	if err := validateHandshakeFrame(frame1, MessageTypeHandshakeInit); err != nil {
-		return nil, err
+		return nil, HandshakeResult{}, err
 	}
 	if err := responder.ReadFlight(frame1.Payload); err != nil {
-		return nil, err
+		return nil, HandshakeResult{}, err
 	}
 
 	flight2Payload, err := responder.WriteFlight()
 	if err != nil {
-		return nil, err
+		return nil, HandshakeResult{}, err
 	}
 	frame2, err := NewFrame(MessageTypeHandshakeResponse, [16]byte{}, 0, flight2Payload, make([]byte, AEADTagSize), nil)
 	if err != nil {
-		return nil, err
+		return nil, HandshakeResult{}, err
 	}
 	if err := transport.WriteFrame(ctx, frame2); err != nil {
-		return nil, err
+		return nil, HandshakeResult{}, err
 	}
 
 	frame3, err := transport.ReadFrame(ctx)
 	if err != nil {
-		return nil, err
+		return nil, HandshakeResult{}, err
 	}
 	if err := validateHandshakeFrame(frame3, MessageTypeHandshakeResponse); err != nil {
-		return nil, err
+		return nil, HandshakeResult{}, err
 	}
 	if err := responder.ReadFlight(frame3.Payload); err != nil {
-		return nil, err
+		return nil, HandshakeResult{}, err
 	}
 
 	if !responder.Complete() {
-		return nil, ErrHandshakeFailed
+		return nil, HandshakeResult{}, ErrHandshakeFailed
 	}
 
 	result, err := responder.Result()
 	if err != nil {
-		return nil, err
+		return nil, HandshakeResult{}, err
 	}
 
 	if len(s.config.AllowedClients) > 0 {
 		if !isClientAllowed(result.PeerStatic, s.config.AllowedClients) {
-			return nil, ErrClientNotPermitted
+			return nil, HandshakeResult{}, ErrClientNotPermitted
 		}
 	}
 
-	return NewSessionFromHandshake(s.config.CipherSuite, result)
+	session, err := NewSessionFromHandshake(s.config.CipherSuite, result)
+	return session, result, err
+}
+
+func callAdmission(handler AdmissionHandler, ctx context.Context, conn *Connection, info AdmissionInfo) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("%w: admission panic: %v", ErrHandshakeFailed, recovered)
+		}
+	}()
+	return handler(ctx, conn, info)
+}
+
+func callDisconnect(handler DisconnectHandler, ctx context.Context, conn *Connection, info AdmissionInfo, cause error) {
+	defer func() { _ = recover() }()
+	handler(ctx, conn, info, cause)
 }
 
 func validateHandshakeFrame(frame Frame, expected MessageType) error {

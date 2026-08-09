@@ -43,8 +43,9 @@ type ConnectionConfig struct {
 }
 
 type queuedMessage struct {
-	message   any
-	padLength uint8
+	message    any
+	padLength  uint8
+	completion chan error
 }
 
 type closeRequest struct {
@@ -142,6 +143,65 @@ func (c *Connection) Start(ctx context.Context) {
 // ErrOutboundQueueFull rather than blocking when the queue is full.
 func (c *Connection) Send(message any) error { return c.SendPadded(message, 0) }
 
+// TrySend is the explicit nonblocking form of Send.
+func (c *Connection) TrySend(message any) error { return c.Send(message) }
+
+// SendContext waits for outbound queue capacity or context cancellation. It
+// returns after enqueueing and does not wait for the local transport write.
+func (c *Connection) SendContext(ctx context.Context, message any) error {
+	return c.enqueue(ctx, queuedMessage{message: message}, true)
+}
+
+// SendAndWait waits for queue capacity and for the local transport write to
+// complete. Completion does not imply that the peer processed the message.
+func (c *Connection) SendAndWait(ctx context.Context, message any) error {
+	completion := make(chan error, 1)
+	if err := c.enqueue(ctx, queuedMessage{message: message, completion: completion}, true); err != nil {
+		return err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case err := <-completion:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.ctx.Done():
+		select {
+		case err := <-completion:
+			return err
+		default:
+			return context.Cause(c.ctx)
+		}
+	}
+}
+
+func (c *Connection) enqueue(ctx context.Context, item queuedMessage, wait bool) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if c.closing.Load() {
+		return ErrConnectionClosed
+	}
+	if !wait {
+		select {
+		case c.outbound <- item:
+			return nil
+		default:
+			return ErrOutboundQueueFull
+		}
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.ctx.Done():
+		return ErrConnectionClosed
+	case c.outbound <- item:
+		return nil
+	}
+}
+
 // SendPadded queues a message with the requested encrypted-frame padding. It
 // does not wait for network I/O and returns ErrOutboundQueueFull on backpressure.
 func (c *Connection) SendPadded(message any, padLength uint8) error {
@@ -218,6 +278,9 @@ func (c *Connection) shutdown(cause error) {
 	})
 }
 
+// abort force-closes network I/O without waiting for the graceful close path.
+func (c *Connection) abort(cause error) { c.shutdown(cause) }
+
 func (c *Connection) readLoop() {
 	defer c.wg.Done()
 	for {
@@ -266,6 +329,7 @@ func (c *Connection) readLoop() {
 
 func (c *Connection) writeLoop() {
 	defer c.wg.Done()
+	defer c.failPending()
 	for {
 		select {
 		case request := <-c.closeRequest:
@@ -285,10 +349,33 @@ func (c *Connection) writeLoop() {
 			c.shutdown(request.cause)
 			return
 		case item := <-c.outbound:
-			if err := c.writeMessage(item); err != nil {
+			err := c.writeMessage(item)
+			complete(item, err)
+			if err != nil {
 				c.shutdown(err)
 				return
 			}
+		}
+	}
+}
+
+func complete(item queuedMessage, err error) {
+	if item.completion != nil {
+		item.completion <- err
+	}
+}
+
+func (c *Connection) failPending() {
+	err := context.Cause(c.ctx)
+	if err == nil {
+		err = ErrConnectionClosed
+	}
+	for {
+		select {
+		case item := <-c.outbound:
+			complete(item, err)
+		default:
+			return
 		}
 	}
 }

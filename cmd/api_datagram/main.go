@@ -3,113 +3,192 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/tr1xdev/datagram-server.git/internal/config"
+	"github.com/tr1xdev/datagram-server.git/pkg/dgpserver"
 	"github.com/tr1xdev/datagram-server.git/pkg/dgpv1"
 )
 
-func main() {
-	if err := run(); err != nil {
-		log.Fatal(err)
-	}
-}
-
 const (
-	// appMessageTypeEcho identifies an application echo request and response.
 	appMessageTypeEcho uint8 = 0x01
-	// appMessageTypeInfo identifies an application information request and response.
 	appMessageTypeInfo uint8 = 0x02
-	// infoTLVProtocol identifies the protocol name in an information response.
+
 	infoTLVProtocol uint8 = 0x01
-	// infoTLVService identifies the service name in an information response.
-	infoTLVService uint8 = 0x02
+	infoTLVService  uint8 = 0x02
+
+	shutdownTimeout = 10 * time.Second
 )
 
-func responseFor(message any) (*dgpv1.EncryptedData, bool) {
-	data, ok := message.(*dgpv1.EncryptedData)
-	if !ok || data == nil {
-		return nil, false
-	}
+var errUnknownCommand = errors.New("api_datagram: unknown application command")
 
-	response := &dgpv1.EncryptedData{
-		StreamID:       data.StreamID,
-		AppMessageType: data.AppMessageType,
-	}
+type commandHandler func(*dgpserver.Context, *dgpv1.EncryptedData) error
 
-	switch data.AppMessageType {
-	case appMessageTypeEcho:
-		response.Fields = make([]dgpv1.TLV, len(data.Fields))
-		for i, field := range data.Fields {
-			response.Fields[i] = dgpv1.TLV{
-				Type:  field.Type,
-				Value: append([]byte(nil), field.Value...),
-			}
-		}
-	case appMessageTypeInfo:
-		response.Fields = []dgpv1.TLV{
-			{Type: infoTLVProtocol, Value: []byte("dgpv1")},
-			{Type: infoTLVService, Value: []byte("api_datagram")},
-		}
-	default:
-		return nil, false
-	}
-
-	return response, true
+type commandRouter struct {
+	handlers map[uint8]commandHandler
 }
 
-func run() error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
+func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx, logger); err != nil {
+		logger.Error("server stopped", "error", err)
+		os.Exit(1)
+	}
+}
+
+func newCommandRouter() (*commandRouter, error) {
+	router := &commandRouter{handlers: make(map[uint8]commandHandler, 2)}
+	for _, route := range []struct {
+		command uint8
+		handler commandHandler
+	}{
+		{appMessageTypeEcho, handleEcho},
+		{appMessageTypeInfo, handleInfo},
+	} {
+		if err := router.handle(route.command, route.handler); err != nil {
+			return nil, err
+		}
+	}
+	return router, nil
+}
+
+func (r *commandRouter) handle(command uint8, handler commandHandler) error {
+	if handler == nil {
+		return fmt.Errorf("api_datagram: nil handler for command 0x%02x", command)
+	}
+	if _, exists := r.handlers[command]; exists {
+		return fmt.Errorf("api_datagram: duplicate command 0x%02x", command)
+	}
+	r.handlers[command] = handler
+	return nil
+}
+
+func (r *commandRouter) dispatch(ctx *dgpserver.Context, message *dgpv1.EncryptedData) error {
+	handler := r.handlers[message.AppMessageType]
+	if handler == nil {
+		return fmt.Errorf("%w: 0x%02x", errUnknownCommand, message.AppMessageType)
+	}
+	return handler(ctx, message)
+}
+
+func handleEcho(ctx *dgpserver.Context, message *dgpv1.EncryptedData) error {
+	response := &dgpv1.EncryptedData{
+		StreamID:       message.StreamID,
+		AppMessageType: message.AppMessageType,
+		Fields:         make([]dgpv1.TLV, len(message.Fields)),
+	}
+	for i, field := range message.Fields {
+		response.Fields[i] = dgpv1.TLV{Type: field.Type, Value: append([]byte(nil), field.Value...)}
+	}
+	return ctx.Send(response)
+}
+
+func handleInfo(ctx *dgpserver.Context, message *dgpv1.EncryptedData) error {
+	return ctx.Send(&dgpv1.EncryptedData{
+		StreamID:       message.StreamID,
+		AppMessageType: message.AppMessageType,
+		Fields: []dgpv1.TLV{
+			{Type: infoTLVProtocol, Value: []byte("dgpv1")},
+			{Type: infoTLVService, Value: []byte("api_datagram")},
+		},
+	})
+}
+
+func newServer(cfg config.Config, logger *slog.Logger) (*dgpserver.Server, error) {
+	if logger == nil {
+		return nil, errors.New("api_datagram: nil logger")
+	}
+	if cfg.HandshakeTimeout < 0 {
+		return nil, errors.New("api_datagram: handshake timeout must not be negative")
 	}
 	staticKey, err := dgpv1.LoadStaticKey(cfg.StaticKey[:])
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("load static key: %w", err)
 	}
-	server, err := dgpv1.NewServer(dgpv1.ServerConfig{
-		StaticKey:               staticKey,
-		CipherSuite:             dgpv1.CipherChaCha20Poly1305,
-		HandshakeTimeout:        cfg.HandshakeTimeout,
-		ReadTimeout:             cfg.ReadTimeout,
-		WriteTimeout:            cfg.WriteTimeout,
-		IdleTimeout:             cfg.IdleTimeout,
-		KeepaliveInterval:       cfg.KeepaliveInterval,
-		KeepaliveTimeout:        cfg.KeepaliveTimeout,
-		OutboundQueue:           cfg.OutboundQueue,
-		HandlerQueue:            cfg.HandlerQueue,
-		MaxConcurrentHandshakes: cfg.MaxConcurrentHandshakes,
-		MaxActiveConnections:    cfg.MaxActiveConnections,
-		Handler: func(_ context.Context, conn *dgpv1.Connection, message any) error {
-			response, ok := responseFor(message)
-			if !ok {
+	commands, err := newCommandRouter()
+	if err != nil {
+		return nil, err
+	}
+
+	server, err := dgpserver.New(dgpserver.Config{
+		DGP: dgpv1.ServerConfig{
+			StaticKey:               staticKey,
+			CipherSuite:             dgpv1.CipherChaCha20Poly1305,
+			HandshakeTimeout:        cfg.HandshakeTimeout,
+			ReadTimeout:             cfg.ReadTimeout,
+			WriteTimeout:            cfg.WriteTimeout,
+			IdleTimeout:             cfg.IdleTimeout,
+			KeepaliveInterval:       cfg.KeepaliveInterval,
+			KeepaliveTimeout:        cfg.KeepaliveTimeout,
+			OutboundQueue:           cfg.OutboundQueue,
+			HandlerQueue:            cfg.HandlerQueue,
+			MaxConcurrentHandshakes: cfg.MaxConcurrentHandshakes,
+			MaxActiveConnections:    cfg.MaxActiveConnections,
+		},
+		Authenticator: dgpserver.AuthenticatorFunc(func(context.Context, dgpserver.Credentials) (dgpserver.Principal, error) {
+			// Noise XX has already authenticated possession of the peer static key.
+			return "noise-peer", nil
+		}),
+		ErrorHandler: func(_ *dgpserver.Context, err error) error {
+			if errors.Is(err, errUnknownCommand) || errors.Is(err, dgpserver.ErrNotHandled) {
+				logger.Warn("application message not handled")
 				return nil
 			}
-			return conn.Send(response)
+			logger.Error("application handler failed")
+			return err
 		},
+		OnConnect: func(_ context.Context, info dgpserver.ConnectionInfo) error {
+			logger.Info("peer connected", "remote_addr", info.Peer.Address())
+			return nil
+		},
+		OnDisconnect: func(_ context.Context, info dgpserver.ConnectionInfo, _ error) {
+			logger.Info("peer disconnected", "remote_addr", info.Peer.Address())
+		},
+		DisconnectTimeout: 5 * time.Second,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("create server: %w", err)
+	}
+	if err := dgpserver.RegisterTyped[dgpv1.EncryptedData](server.Router(), commands.dispatch); err != nil {
+		return nil, fmt.Errorf("register application routes: %w", err)
+	}
+	return server, nil
+}
+
+func run(ctx context.Context, logger *slog.Logger) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	server, err := newServer(cfg, logger)
 	if err != nil {
 		return err
 	}
 	listener, err := net.Listen("tcp", cfg.Address)
 	if err != nil {
-		return err
+		return fmt.Errorf("listen: %w", err)
 	}
+	logger.Info("DGPv1 server listening", "address", listener.Addr().String())
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	go func() {
-		<-ctx.Done()
-		_ = server.Close()
-	}()
-
-	log.Printf("DGPv1 server listening on %s", listener.Addr())
-	if err := server.Serve(listener); err != nil && !errors.Is(err, dgpv1.ErrServerClosed) {
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- server.Serve(context.Background(), listener) }()
+	select {
+	case err := <-serveDone:
 		return err
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		return <-serveDone
 	}
-	return nil
 }
