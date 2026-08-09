@@ -6,7 +6,7 @@ This document is the implementation-ready contract for `pkg/dgpserver`, an ergon
 
 The earlier roadmap had sound safety goals, but left too much architecture for implementation time:
 
-- Its proposed `func(*Context, any) error` handler forced application type switches; `cmd/api_datagram` demonstrates the resulting assertion and `AppMessageType` switch.
+- Its proposed `func(*Context, any) error` handler forced application type switches. `cmd/api_datagram` now uses typed DGP registration after its SDK migration, but application-command dispatch is still a local `AppMessageType` map rather than the planned SDK command router.
 - Protocol-message routing was described, but codec-neutral routing of commands inside `EncryptedData` was not designed.
 - `Context` risked becoming a synchronized state bag/service locator instead of a narrow request and connection capability.
 - Listener creation/closure, root cancellation, graceful shutdown, immediate close, repeat calls, and `Serve` return values were not one precise state machine.
@@ -301,36 +301,62 @@ Integration tests still use real loopback TCP plus a `dgpv1` client for handshak
 
 ## MVP implementation phases
 
+Audit basis: `HEAD` `903fd10`, the current `pkg/dgpserver`, `pkg/dgpv1`, and `cmd/api_datagram` code/tests, plus `docs/protocol/dgp-v1.md`. A checked aggregate item means every clause is implemented and covered; partial work stays open and is split below.
+
 ### Phase A — contract and low-level seams
 
-- [ ] Approve owner decisions below and add compile-only API examples.
+- [ ] Approve the remaining public-contract decisions and add compile-only API examples.
+  - [x] Implementation has selected behavior for local write completion, context-driven serving, nil authentication, error observation, and disconnect timeout.
+  - [ ] Reconcile the frozen contract/examples with the implemented API (`RegisterTyped`, `Config.DGP`, embedded `Context`, send signatures, error names, and hook/auth types), then add compiling examples.
 - [x] Add a narrow completed-handshake admission value/callback exposing peer public key, session ID, and address; preserve existing `dgpv1.Server` callers.
 - [x] Add context-aware queue admission and write completion internally/compatibly to `dgpv1.Connection`; keep `Connection.Send` unchanged.
-- [ ] Define a tested precedence table for simultaneous transport, handler, local close, and shutdown terminal causes.
+- [ ] Define and test a precedence table for simultaneous transport, handler, local close, and shutdown terminal causes.
 
-**Acceptance:** all old tests pass; no high-level code accesses frames, traffic secrets, replay, or rekey internals; no public signature remains undecided.
+**Acceptance:** low-level seams and compatibility are implemented and current tests pass, but Phase A remains open until the public contract/examples and terminal-cause precedence are settled.
 
 ### Phase B — router, context, errors, and unit seam
 
-- [ ] Implement handler types, typed adapters, frozen router, command router/groups, middleware compilation, `Context`, immutable metadata, recorder, and dispatch helper.
-- [ ] Unit-test duplicates, wrong generic types, middleware order/short-circuit, decoder failures, panic recovery, ownership, and send semantics.
+- [ ] Complete handler types, typed adapters, frozen routing, command routing/groups, middleware compilation, `Context`, immutable metadata, recorder, and dispatch helper.
+  - [x] Handler/middleware types, closed-set typed registration, frozen DGP routing, narrow `Context`, defensive snapshots, and a bounded recorder are implemented.
+  - [ ] Add the codec-neutral SDK command router/groups and contract-level dispatch helper; reconcile remaining API/error-policy differences.
+- [ ] Complete unit coverage for duplicates, wrong generic forms, middleware order/short-circuit, decoder failures, panic recovery, ownership, and send semantics.
+  - [x] Tests cover DGP-route duplication/type form, freeze behavior, middleware order/short-circuit, panic conversion, defensive copying, recorder bounds/cancellation, and low-level queue/write semantics.
+  - [ ] Add decoder/group coverage after command routing exists, plus explicit coverage for middleware calling `next` twice and reconciled API semantics.
 
-**Acceptance:** the hello-world and all examples compile; application handlers need no `any` switch for DGP messages; router/middleware tests need no crypto or network.
+**Acceptance:** typed DGP handlers and in-memory tests work without crypto/network, but the command-router API and compile-only examples are missing.
 
 ### Phase C — admission, hooks, and runtime lifecycle
 
-- [ ] Implement `New`, `Serve`, `Shutdown`, `Close`, authentication, principal propagation, error policy, and exact hooks over `dgpv1`.
-- [ ] Test freeze races, one-Serve rule, cancellation, connect rejection/panic, all disconnect paths, and shutdown deadline escalation.
+- [ ] Finish `New`, `Serve`, `Shutdown`, `Close`, authentication, principal propagation, error policy, and exact hooks over `dgpv1`.
+  - [x] Runtime construction, one-shot serving, route freeze, context-triggered stop, shutdown escalation, immediate close, completed-handshake authentication, principal propagation, error observation, and hooks are implemented.
+  - [x] A static-key allowlist adapter exists.
+  - [ ] Align hook registration/order and terminal-cause behavior with the frozen contract, including exactly-once disconnect for every admitted connection and the Phase A precedence table.
+  - [ ] Define and enforce production authorization and identity mapping; `cmd/api_datagram` currently maps every cryptographically valid Noise peer to the constant principal `"noise-peer"`.
+- [ ] Complete lifecycle tests for freeze races, the one-`Serve` rule, cancellation, connect rejection/panic, every disconnect path, and shutdown deadline escalation.
+  - [x] Real-TCP tests cover authenticate → connect → typed route/response → disconnect, connect rejection/panic isolation, exactly-once disconnect on the normal path, and shutdown escalation.
+  - [ ] Add race-tested freeze/mutation, repeated/concurrent `Serve`, root-cancellation outcomes, and an exhaustive abnormal-exit/disconnect matrix.
 
-**Acceptance:** listener ownership and every lifecycle transition match this contract; `OnDisconnect` is exactly once for every admitted connection.
+**Acceptance:** runtime behavior is sufficient for MVP application development and loopback integration, but production lifecycle/authorization evidence is incomplete.
 
 ### Phase D — compatibility, examples, and release
 
 - [x] Migrate `cmd/api_datagram` to `pkg/dgpserver` without changing protocol behavior.
+  - [x] It uses `dgpserver.New`, typed `EncryptedData` registration, SDK lifecycle/auth/error hooks, and graceful shutdown; the former DGP type assertion/switch is gone.
+  - [ ] Application commands still use a local `AppMessageType` map; migrate it after the SDK command router exists.
 - [ ] Add echo, authenticated, command-router, middleware, graceful-shutdown, and migration examples.
+  - [x] `cmd/api_datagram` is a tested service-migration example with echo/info handlers and graceful shutdown.
+  - [ ] Add standalone compiled examples, especially allowlist authentication, SDK command groups, and middleware.
 - [ ] Add real-TCP tests, race/stress/leak tests, fuzz registration/config boundaries, and benchmarks for dispatch overhead.
+  - [x] SDK real-TCP integration covers authentication, hooks, typed dispatch/response, rejection/panic isolation, and shutdown escalation; `pkg/dgpv1` has parser fuzz targets.
+  - [ ] Add automatic-rekey and all-abnormal-exit SDK flows, race/stress/leak suites, SDK registration/config fuzzing, and dispatch benchmarks.
 
-**Acceptance:** existing direct `dgpv1` users remain source-compatible; the command switch in `cmd/api_datagram` is replaced by command routes; docs state concurrency, ownership, backpressure, auth, and shutdown semantics.
+**Acceptance:** direct `dgpv1` users remain source-compatible and `cmd/api_datagram` has migrated, but command routing, documentation/examples, and release evidence are incomplete.
+
+### MVP messenger development boundary
+
+The current code is sufficient to begin MVP messenger application development: DGPv1 framing/Noise/session behavior is implemented; the high-level server authenticates and exposes a principal; typed DGP messages support bounded sends; graceful shutdown exists; and real-TCP integration plus the migrated service exercise the main path.
+
+This is not production-release readiness. Before production, finish authorization policy and static-key-to-application-identity mapping, terminal-cause/hook precedence, command-router/API reconciliation, and race/leak/stress/fuzz/benchmark/release evidence. The race gate remains open because the required run was not possible with the earlier CGO/toolchain.
 
 ## Explicit MVP non-goals
 
@@ -347,16 +373,36 @@ Do **not** include in the first release:
 
 ## Security and reliability release gates
 
-- [ ] Existing wire vectors and `dgpv1` tests remain unchanged and green.
-- [ ] `go test ./...`, `go test -race ./... -count=10`, and `go vet ./...` pass.
-- [ ] No known races, goroutine/connection leaks, double hooks, or callbacks started after cancellation.
-- [ ] Memory remains bounded under slow peers, full inbound/outbound queues, and handshake floods.
-- [ ] Graceful shutdown finishes under load within its deadline and escalates deterministically.
-- [ ] Authentication errors and panic stacks never leak to peers; logs redact payloads, keys, session IDs, and addresses by default.
-- [ ] Fuzz/property tests cover malformed messages, decoder errors, registration conflicts, and shutdown/send races.
-- [ ] Real TCP tests cover authenticate → connect → route → automatic rekey → close and every abnormal exit.
-- [ ] Exported API has complete `go doc`, ownership/concurrency text, migration guidance, and compiled examples.
-- [ ] Dependency review and SBOM are complete; first release remains experimental until exercised by a real service.
+- [ ] Preserve wire compatibility and keep existing vectors/`dgpv1` behavior green.
+  - [x] Current wire-vector and `pkg/dgpv1` tests pass at `903fd10`.
+  - [ ] Record release evidence that committed vectors and compatibility were not unintentionally changed.
+- [ ] Pass `go test ./...`, `go test -race ./... -count=10`, and `go vet ./...`.
+  - [x] `go test ./...` and `go vet ./...` pass in this audit.
+  - [ ] The race run remains unverified; do not close this gate because the earlier CGO/toolchain could not run it.
+- [ ] Demonstrate no races, goroutine/connection leaks, double hooks, or callbacks started after cancellation.
+  - [x] The normal admitted real-TCP path asserts one disconnect callback.
+  - [ ] Add race/leak/stress coverage and the complete cancellation/abnormal-exit hook matrix.
+- [ ] Demonstrate bounded memory under slow peers, full queues, and handshake floods.
+  - [x] Queue/admission limits and bounded recorder/connection paths exist with focused tests.
+  - [ ] Add sustained slow-peer, saturation, and handshake-flood stress evidence.
+- [ ] Demonstrate graceful shutdown under load within its deadline with deterministic escalation.
+  - [x] Deadline escalation and network cancellation have focused integration coverage.
+  - [ ] Add loaded shutdown/stress coverage and terminal-cause precedence assertions.
+- [ ] Ensure authentication errors and panic stacks never leak to peers; redact sensitive logs by default.
+  - [x] Local wrapper errors sanitize causes, and authentication/hook/handler panic paths are recovered in focused tests.
+  - [ ] Audit peer-visible responses and logging end to end; the migrated command logs remote addresses explicitly.
+- [ ] Fuzz/property-test malformed messages, decoder errors, registration conflicts, and shutdown/send races.
+  - [x] `pkg/dgpv1` contains malformed-parser fuzz coverage.
+  - [ ] Add SDK decoder/registration/config and shutdown/send race fuzz/property tests.
+- [ ] Cover authenticate → connect → route → automatic rekey → close and every abnormal exit over real TCP.
+  - [x] Real TCP covers authenticate → connect → route/response → close, connect rejection/panic, and shutdown escalation.
+  - [ ] Add automatic rekey and an exhaustive abnormal-exit matrix.
+- [ ] Complete exported `go doc`, ownership/concurrency text, migration guidance, and compiled examples.
+  - [x] Exported SDK symbols have baseline comments and ownership intent is represented in code/tests.
+  - [ ] Reconcile docs with the implemented API and add complete compiled examples/migration guidance.
+- [ ] Complete dependency review and SBOM; keep the first release experimental until exercised by a real service.
+  - [x] `cmd/api_datagram` now exercises the SDK as the repository service migration.
+  - [ ] Produce dependency-review/SBOM artifacts and explicit experimental-release evidence.
 
 ## Owner decisions before coding
 
