@@ -332,7 +332,8 @@ Audit basis: `HEAD` `903fd10`, the current `pkg/dgpserver`, `pkg/dgpv1`, and `cm
 - [ ] Finish `New`, `Serve`, `Shutdown`, `Close`, authentication, principal propagation, error policy, and exact hooks over `dgpv1`.
   - [x] Runtime construction, one-shot serving, route freeze, context-triggered stop, shutdown escalation, immediate close, completed-handshake authentication, principal propagation, error observation, and hooks are implemented.
   - [x] A static-key allowlist adapter exists.
-  - [ ] Align hook registration/order and terminal-cause behavior with the frozen contract, including exactly-once disconnect for every admitted connection and the Phase A precedence table.
+  - [x] Ensure connect rejection/panic triggers exactly one disconnect hook after active state registration.
+  - [ ] Complete terminal-cause precedence and the remaining abnormal disconnect matrix.
   - [ ] Define and enforce production authorization and identity mapping; `cmd/api_datagram` currently maps every cryptographically valid Noise peer to the constant principal `"noise-peer"`.
 - [ ] Complete lifecycle tests for freeze races, the one-`Serve` rule, cancellation, connect rejection/panic, every disconnect path, and shutdown deadline escalation.
   - [x] Real-TCP tests cover authenticate → connect → typed route/response → disconnect, connect rejection/panic isolation, exactly-once disconnect on the normal path, and shutdown escalation.

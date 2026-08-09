@@ -243,12 +243,14 @@ func (s *Server) admit(ctx context.Context, conn *dgpv1.Connection, info dgpv1.A
 		}
 	}
 	state := connectionState{peer: NewPeer(address, info.SessionID, info.PeerStatic[:]), principal: principal}
+	s.states.Store(conn, state)
 	if s.config.OnConnect != nil {
 		if err := callConnect(s.config.OnConnect, ctx, ConnectionInfo{Peer: state.peer, Principal: principal}); err != nil {
+			s.states.Delete(conn)
+			s.callDisconnect(state, err)
 			return err
 		}
 	}
-	s.states.Store(conn, state)
 	return nil
 }
 
@@ -282,6 +284,13 @@ func (s *Server) disconnected(_ context.Context, conn *dgpv1.Connection, _ dgpv1
 		return
 	}
 	state := value.(connectionState)
+	s.callDisconnect(state, cause)
+}
+
+func (s *Server) callDisconnect(state connectionState, cause error) {
+	if s.config.OnDisconnect == nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.DisconnectTimeout)
 	defer cancel()
 	callDisconnectHook(s.config.OnDisconnect, ctx, ConnectionInfo{Peer: state.peer, Principal: state.principal}, cause)

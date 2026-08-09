@@ -180,7 +180,7 @@ func TestServerRealTCPAuthDispatchResponseAndLifecycle(t *testing.T) {
 	}
 }
 
-func TestServerConnectRejectAndPanicNeverDispatchOrDisconnect(t *testing.T) {
+func TestServerConnectRejectAndPanicDisconnectExactlyOnce(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		hook func(context.Context, ConnectionInfo) error
@@ -208,7 +208,7 @@ func TestServerConnectRejectAndPanicNeverDispatchOrDisconnect(t *testing.T) {
 			_ = tr.Close()
 			_ = srv.Close()
 			<-done
-			if handlers != 0 || disconnects != 0 {
+			if handlers != 0 || disconnects != 1 {
 				t.Fatalf("handlers=%d disconnects=%d", handlers, disconnects)
 			}
 		})
