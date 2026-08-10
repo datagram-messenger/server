@@ -51,3 +51,7 @@ There is no automatic wire error response. If policy permits one, send a sanitiz
 - Avoid logging payloads, static keys, principals, session IDs, message text, or error causes unless a reviewed data policy permits it. Prefer coarse event types and safe correlation values.
 - DGP transport security does not provide business authorization, idempotency, durable delivery, or peer processing confirmation.
 - Do not enable or document historical post-MVP protocol features. Consult the [DGPv1 specification](../protocol/dgp-v1.md) and [pre-deployment checklist](../pre-deployment-checklist.md).
+
+## Send behavior during termination
+
+`Context.Send` and `Context.SendAndWait` use the handler context, so cancellation that wins before connection termination returns that context error. Once a terminal transition begins, new low-level sends return `dgpv1.ErrConnectionClosed`, and pending queue-admission and completion waiters are released. `TrySend` remains nonblocking. Control close has a dedicated path and cannot be trapped behind a full application queue. Concurrent/repeated connection `Close`, server `Shutdown`, and server `Close` are idempotent; terminal-cause precedence remains stable. Disconnect hooks receive snapshots only and cannot send.
