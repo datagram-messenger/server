@@ -10,8 +10,14 @@ linters:
     - errcheck
     - govet
     - ineffassign
+    - intrange
+    - revive
     - staticcheck
     - unused
+  settings:
+    revive:
+      rules:
+        - name: use-waitgroup-go
 
 issues:
   max-issues-per-linter: 0
