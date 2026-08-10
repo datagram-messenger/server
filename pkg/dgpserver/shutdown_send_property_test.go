@@ -58,7 +58,7 @@ func TestConcurrentServerShutdownAndCloseBeforeServe(t *testing.T) {
 	start := make(chan struct{})
 	results := make(chan error, callers)
 	var wg sync.WaitGroup
-	for i := 0; i < callers; i++ {
+	for i := range callers {
 		wg.Add(1)
 		go func(closeServer bool) {
 			defer wg.Done()

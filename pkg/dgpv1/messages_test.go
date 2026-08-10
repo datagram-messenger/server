@@ -246,7 +246,7 @@ func TestTrailingBytesRejected(t *testing.T) {
 
 func TestTruncationAtEveryBoundary(t *testing.T) {
 	wire, _ := (Ack{Sequences: []uint64{1, 2}}).MarshalBinary()
-	for n := 0; n < len(wire); n++ {
+	for n := range len(wire) {
 		var got Ack
 		if err := got.UnmarshalBinary(wire[:n]); err == nil {
 			t.Fatalf("accepted %d bytes", n)

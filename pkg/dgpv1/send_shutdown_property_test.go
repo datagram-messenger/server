@@ -97,7 +97,7 @@ func TestFullQueueWaitersAndControlCloseProperties(t *testing.T) {
 	const waiters = 16
 	start := make(chan struct{})
 	results := make(chan error, waiters)
-	for i := 0; i < waiters; i++ {
+	for i := range waiters {
 		go func(n int) {
 			<-start
 			if n%2 == 0 {
@@ -114,7 +114,7 @@ func TestFullQueueWaitersAndControlCloseProperties(t *testing.T) {
 	if err := receiveBounded(t, closed); err != nil {
 		t.Fatalf("Close behind full application queue = %v", err)
 	}
-	for i := 0; i < waiters; i++ {
+	for i := range waiters {
 		if err := receiveBounded(t, results); !errors.Is(err, ErrConnectionClosed) {
 			t.Fatalf("waiter %d = %v, want %v", i, err, ErrConnectionClosed)
 		}
@@ -181,7 +181,7 @@ func TestSendCancellationPrecedenceBeforeTerminalState(t *testing.T) {
 
 func assertTerminalSendRejection(t *testing.T, connection *Connection, send func(*Connection, context.Context, uint64) error) {
 	t.Helper()
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		if err := send(connection, context.Background(), uint64(i+100)); !errors.Is(err, ErrConnectionClosed) {
 			t.Fatalf("post-terminal send %d = %v, want %v", i, err, ErrConnectionClosed)
 		}

@@ -156,7 +156,7 @@ func TestTCPTransportConcurrentWritesSerialized(t *testing.T) {
 	const count = 12
 	var wg sync.WaitGroup
 	errCh := make(chan error, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -164,7 +164,7 @@ func TestTCPTransportConcurrentWritesSerialized(t *testing.T) {
 		}(i)
 	}
 	seen := make(map[uint64]bool)
-	for i := 0; i < count; i++ {
+	for range count {
 		f, err := reader.ReadFrame(context.Background())
 		if err != nil {
 			t.Fatal(err)

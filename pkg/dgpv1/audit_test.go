@@ -28,7 +28,7 @@ func TestSessionPreviousEpochGraceFrameBoundary(t *testing.T) {
 
 			// Advance the old epoch so the delayed frame's sequence does not
 			// collide with current-epoch sequences used to exhaust the grace budget.
-			for i := 0; i < 2; i++ {
+			for i := range 2 {
 				frame, err := sender.Send(PingPong{Nonce: uint64(i)}, 0)
 				if err != nil {
 					t.Fatal(err)

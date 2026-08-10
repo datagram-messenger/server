@@ -259,7 +259,7 @@ func TestConnectionPeriodicKeepaliveAndPong(t *testing.T) {
 	connection.Start(context.Background())
 
 	var previous uint64
-	for cycle := 0; cycle < 3; cycle++ {
+	for cycle := range 3 {
 		ping, ok := readConnectionMessage(t, peerTransport, peerSession).(*PingPong)
 		if !ok || ping.IsResponse || ping.Nonce <= previous {
 			t.Fatalf("cycle %d ping = %#v, previous nonce %d", cycle, ping, previous)
