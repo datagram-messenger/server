@@ -71,7 +71,7 @@ Use real loopback TCP and a `dgpv1` client for:
 - lifecycle hook ordering and disconnect causes;
 - rekey, replay, malformed input, and other protocol behavior.
 
-Keep integration tests deterministic with explicit synchronization and deadlines. The package's [`runtime_integration_test.go`](../../pkg/dgpserver/runtime_integration_test.go) demonstrates a full handshake, authenticated dispatch, response, and shutdown.
+Keep integration tests deterministic with explicit synchronization and deadlines. The package's [`runtime_integration_test.go`](../../pkg/dgpserver/runtime_integration_test.go) demonstrates a full handshake, authenticated dispatch, response, and shutdown. [`abnormal_disconnect_integration_test.go`](../../pkg/dgpserver/abnormal_disconnect_integration_test.go) verifies that handler errors, recovered handler panics, and replay rejection reach `OnDisconnect` exactly once with an error preserving the terminal cause through `errors.Is`.
 
 ## Dispatch benchmarks
 
