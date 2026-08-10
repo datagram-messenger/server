@@ -204,11 +204,9 @@ func (s *Server) Serve(listener net.Listener) error {
 			continue
 		}
 
-		s.wg.Add(1)
-		go func(c net.Conn) {
-			defer s.wg.Done()
-			s.handleConn(c)
-		}(netConn)
+		s.wg.Go(func() {
+			s.handleConn(netConn)
+		})
 	}
 }
 

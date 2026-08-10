@@ -52,7 +52,7 @@ func TestSessionPreviousEpochGraceFrameBoundary(t *testing.T) {
 			}
 			receiveRekey(t, receiver, rekey)
 
-			for i := 0; i < tc.currentFrames; i++ {
+			for i := range tc.currentFrames {
 				frame, err := sender.Send(PingPong{Nonce: uint64(i)}, 0)
 				if err != nil {
 					t.Fatal(err)

@@ -296,9 +296,7 @@ func TestRecorderContextAndConcurrency(t *testing.T) {
 	ctx := recorder.NewContext(context.Background(), Peer{}, Metadata{}, Params{})
 	var wait sync.WaitGroup
 	for index := range count {
-		wait.Add(1)
-		go func(index int) {
-			defer wait.Done()
+		wait.Go(func() {
 			var err error
 			if index%2 == 0 {
 				err = ctx.TrySend(&dgpv1.Ack{Sequences: []uint64{uint64(index)}})
@@ -308,7 +306,7 @@ func TestRecorderContextAndConcurrency(t *testing.T) {
 			if err != nil {
 				t.Errorf("send %d: %v", index, err)
 			}
-		}(index)
+		})
 	}
 	wait.Wait()
 	if recorder.Len() != count {

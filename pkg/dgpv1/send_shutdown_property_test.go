@@ -135,12 +135,10 @@ func TestConcurrentCloseIsIdempotentAndTerminalCauseStable(t *testing.T) {
 	results := make(chan error, callers)
 	var callersWG sync.WaitGroup
 	for range callers {
-		callersWG.Add(1)
-		go func() {
-			defer callersWG.Done()
+		callersWG.Go(func() {
 			<-start
 			results <- connection.Close()
-		}()
+		})
 	}
 	close(start)
 	callersWG.Wait()

@@ -307,13 +307,11 @@ func TestSessionConcurrentRekeySafe(t *testing.T) {
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	for range count {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			frame, err := client.Send(PingPong{Nonce: 1}, 0)
 			results <- result{frame: frame, err: err}
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

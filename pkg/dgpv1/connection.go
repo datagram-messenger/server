@@ -117,16 +117,11 @@ func NewConnection(transport *TCPTransport, session *Session, config ConnectionC
 func (c *Connection) Start(ctx context.Context) {
 	c.startOnce.Do(func() {
 		c.started.Store(true)
-		loops := 3
+		c.wg.Go(c.readLoop)
+		c.wg.Go(c.writeLoop)
+		c.wg.Go(c.maintenanceLoop)
 		if c.config.Handler != nil {
-			loops++
-		}
-		c.wg.Add(loops)
-		go c.readLoop()
-		go c.writeLoop()
-		go c.maintenanceLoop()
-		if c.config.Handler != nil {
-			go c.handlerLoop()
+			c.wg.Go(c.handlerLoop)
 		}
 		go func() {
 			select {
@@ -328,7 +323,6 @@ func handlerCauseRank(cause error) uint8 {
 func (c *Connection) abort(cause error) { c.shutdown(cause) }
 
 func (c *Connection) readLoop() {
-	defer c.wg.Done()
 	for {
 		ctx, cancel := c.operationContext(c.config.ReadTimeout)
 		frame, err := c.transport.ReadFrame(ctx)
@@ -374,7 +368,6 @@ func (c *Connection) readLoop() {
 }
 
 func (c *Connection) writeLoop() {
-	defer c.wg.Done()
 	defer c.failPending()
 	for {
 		select {
@@ -450,7 +443,6 @@ func (c *Connection) writeMessage(item queuedMessage) error {
 }
 
 func (c *Connection) maintenanceLoop() {
-	defer c.wg.Done()
 	var idleTimer, keepaliveTimer, pongTimer *time.Timer
 	var idle, keepalive, pongDeadline <-chan time.Time
 	if c.config.IdleTimeout > 0 {
@@ -512,7 +504,6 @@ func (c *Connection) maintenanceLoop() {
 }
 
 func (c *Connection) handlerLoop() {
-	defer c.wg.Done()
 	for {
 		select {
 		case <-c.ctx.Done():

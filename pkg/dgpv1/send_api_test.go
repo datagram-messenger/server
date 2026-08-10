@@ -92,14 +92,14 @@ func TestSendAndWaitCloseRaceCompletesWithoutLeak(t *testing.T) {
 	defer cleanup()
 	connection.Start(context.Background())
 	results := make(chan error, 8)
-	for i := 0; i < cap(results); i++ {
+	for i := range cap(results) {
 		go func(n int) {
 			results <- connection.SendAndWait(context.Background(), Ack{Sequences: []uint64{uint64(n + 1)}})
 		}(i)
 	}
 	_ = peerTransport.Close()
 	deadline := time.After(connectionTestTimeout)
-	for i := 0; i < cap(results); i++ {
+	for range cap(results) {
 		select {
 		case <-results:
 		case <-deadline:

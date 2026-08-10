@@ -157,11 +157,9 @@ func TestTCPTransportConcurrentWritesSerialized(t *testing.T) {
 	var wg sync.WaitGroup
 	errCh := make(chan error, count)
 	for i := range count {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			errCh <- tr.WriteFrame(context.Background(), testTransportFrame(t, uint64(i), bytes.Repeat([]byte{byte(i)}, 32)))
-		}(i)
+		})
 	}
 	seen := make(map[uint64]bool)
 	for range count {

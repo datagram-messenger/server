@@ -60,13 +60,11 @@ func TestSessionConcurrentSendSequences(t *testing.T) {
 	errs := make(chan error, count)
 	var wg sync.WaitGroup
 	for range count {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			frame, err := client.Send(PingPong{Nonce: 1}, 0)
 			frames <- frame
 			errs <- err
-		}()
+		})
 	}
 	wg.Wait()
 	close(frames)

@@ -59,16 +59,15 @@ func TestConcurrentServerShutdownAndCloseBeforeServe(t *testing.T) {
 	results := make(chan error, callers)
 	var wg sync.WaitGroup
 	for i := range callers {
-		wg.Add(1)
-		go func(closeServer bool) {
-			defer wg.Done()
+		closeServer := i%2 == 0
+		wg.Go(func() {
 			<-start
 			if closeServer {
 				results <- server.Close()
 				return
 			}
 			results <- server.Shutdown(context.Background())
-		}(i%2 == 0)
+		})
 	}
 	close(start)
 	wg.Wait()
