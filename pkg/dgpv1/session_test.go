@@ -148,6 +148,17 @@ func TestSessionFailedAuthenticationDoesNotCommit(t *testing.T) {
 
 func TestSessionCloseAndValidation(t *testing.T) {
 	client, server := testSessions(t)
+	for _, message := range []any{
+		(*EncryptedData)(nil),
+		(*PingPong)(nil),
+		(*SessionClose)(nil),
+		(*Ack)(nil),
+		(*ErrorMessage)(nil),
+	} {
+		if _, err := client.Send(message, 0); !errors.Is(err, ErrMessageType) {
+			t.Fatalf("nil %T error = %v, want %v", message, err, ErrMessageType)
+		}
+	}
 	if _, err := client.Send(HandshakeInit{}, 0); !errors.Is(err, ErrMessageType) {
 		t.Fatalf("invalid message error = %v", err)
 	}
