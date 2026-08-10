@@ -149,9 +149,10 @@ type pendingSendRekey struct {
 	epoch uint32
 }
 
-// Send marshals and encrypts a strict-MVP typed message. It is safe for
-// concurrent use. At a rekey boundary it returns an internally generated
-// RekeyInit. A direct caller MUST transmit it, call MarkRekeySent, and retry the
+// Send marshals and encrypts a strict-MVP typed message. Nil typed-message
+// pointers are rejected with ErrMessageType. It is safe for concurrent use. At
+// a rekey boundary it returns an internally generated RekeyInit. A direct caller
+// MUST transmit it, call MarkRekeySent, and retry the
 // original message. Until then all sends fail with ErrRekeyPending, so no
 // new-epoch application frame can overtake RekeyInit. Connection does this
 // automatically.
@@ -468,22 +469,47 @@ func validSessionMessageType(messageType MessageType) bool {
 
 func outboundMessage(message any) (MessageType, encoding.BinaryMarshaler, error) {
 	var messageType MessageType
-	switch message.(type) {
-	case EncryptedData, *EncryptedData:
+	switch typed := message.(type) {
+	case EncryptedData:
 		messageType = MessageTypeEncryptedData
-	case PingPong, *PingPong:
+	case *EncryptedData:
+		if typed == nil {
+			return 0, nil, fmt.Errorf("%w: nil %T", ErrMessageType, message)
+		}
+		messageType = MessageTypeEncryptedData
+	case PingPong:
 		messageType = MessageTypePingPong
-	case SessionClose, *SessionClose:
+	case *PingPong:
+		if typed == nil {
+			return 0, nil, fmt.Errorf("%w: nil %T", ErrMessageType, message)
+		}
+		messageType = MessageTypePingPong
+	case SessionClose:
 		messageType = MessageTypeSessionClose
-	case Ack, *Ack:
+	case *SessionClose:
+		if typed == nil {
+			return 0, nil, fmt.Errorf("%w: nil %T", ErrMessageType, message)
+		}
+		messageType = MessageTypeSessionClose
+	case Ack:
 		messageType = MessageTypeAck
-	case ErrorMessage, *ErrorMessage:
+	case *Ack:
+		if typed == nil {
+			return 0, nil, fmt.Errorf("%w: nil %T", ErrMessageType, message)
+		}
+		messageType = MessageTypeAck
+	case ErrorMessage:
+		messageType = MessageTypeError
+	case *ErrorMessage:
+		if typed == nil {
+			return 0, nil, fmt.Errorf("%w: nil %T", ErrMessageType, message)
+		}
 		messageType = MessageTypeError
 	default:
 		return 0, nil, fmt.Errorf("%w: %T", ErrMessageType, message)
 	}
 	marshaler, ok := message.(encoding.BinaryMarshaler)
-	if !ok || marshaler == nil {
+	if !ok {
 		return 0, nil, fmt.Errorf("%w: %T", ErrMessageType, message)
 	}
 	return messageType, marshaler, nil
