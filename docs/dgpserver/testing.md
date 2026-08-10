@@ -106,4 +106,17 @@ go test ./pkg/dgpserver -run '^$' -fuzz '^FuzzCommandRouterRegistrationState$' -
 
 The targets are deliberately network- and crypto-free. Inputs select from bounded duration, queue, connection-limit, message-type, handler-form, duplicate, group, and freeze-state domains rather than treating arbitrary bytes as configuration. The invariants are: no panic; repeatable `New` error classification; application of the documented five-second disconnect default; rejection of a negative `DisconnectTimeout`; exact preservation of delegated DGP duration, queue, and connection-limit boundaries until runtime construction; and stable nil, unsupported, duplicate, and post-freeze registration errors. Command registration also checks conflicts across direct and grouped routes over the complete `uint8` command range.
 
-A two-second target run is only a quick local smoke check. CI or scheduled verification should run the same targets separately with a materially longer fuzz time so a failure is attributable to one state model. Decoder-error behavior and concurrent shutdown/send races remain outside these registration/configuration targets and require separate release-gate coverage.
+A two-second target run is only a quick local smoke check. CI or scheduled verification should run the same targets separately with a materially longer fuzz time so a failure is attributable to one state model.
+
+## Command decoder failure coverage
+
+The decoder-path table/property tests run entirely through the public `Dispatch` safety boundary, while one package-level runtime test exercises `Server.handle` directly to avoid a timing-sensitive network setup. They cover sentinel and wrapped typed errors, codec-defined malformed payloads, unknown commands, typed-nil `EncryptedData`, decoder panic recovery, single decode/no handler invocation on failure, `errors.Is`/`errors.As` preservation, exactly-once `ErrorHandler` observation, and sanitized SDK wrapper formatting.
+
+Run the deterministic cases and fuzz seed corpus, then the fuzz target separately:
+
+```sh
+go test ./pkg/dgpserver -run '^(TestCommandRouterDecoderFailureContract|TestCommandRouterNilMessageRejectedBeforeDecoder|TestCommandRouterDecoderPanicUsesDispatchSafetyBoundary|TestServerHandlePropagatesDecoderErrorToErrorHandlerExactlyOnce|FuzzCommandRouterDecoderPaths)$' -count=1
+go test ./pkg/dgpserver -run '^$' -fuzz '^FuzzCommandRouterDecoderPaths$' -fuzztime=2s
+```
+
+The SDK remains codec-neutral: malformed application payloads are whatever the injected decoder rejects. Protocol-level `EncryptedData` parsing remains owned and tested by `pkg/dgpv1`; the command router neither reparses nor adds a server codec setting. Concurrent shutdown/send races remain a separate open release gate.

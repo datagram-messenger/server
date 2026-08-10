@@ -29,7 +29,7 @@ Authentication rejection occurs before state registration and therefore does not
 
 ## Handler errors and panic policy
 
-`Router.Dispatch` recovers handler and middleware panics as `*PanicError`, matching `ErrHandlerPanic`. In production, the server passes dispatch errors to `Config.ErrorHandler` when configured.
+`Router.Dispatch` recovers handler, middleware, and command-decoder panics as `*PanicError`, matching `ErrHandlerPanic`. In production, the server passes each returned dispatch error to `Config.ErrorHandler` once when configured; this includes unchanged command-decoder errors and unknown commands matching `ErrNotHandled`.
 
 - If no error handler is configured, `ErrNotHandled` is ignored and keeps the connection open.
 - Other returned handler errors become `*HandlerError` and are terminal to the connection.

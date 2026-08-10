@@ -44,7 +44,11 @@ if err := router.HandleEncryptedData(commands.Handler()); err != nil {
 }
 ```
 
-Decoder errors are returned unchanged. An unknown command returns an error matching `ErrNotHandled`. The command router freezes on its first dispatch; finish command and group registration before serving.
+Decoder errors are returned unchanged, preserving `errors.Is`/`errors.As` identity. Decoding runs exactly once before handler lookup; a decoder failure does not invoke command middleware or a command handler. An unknown decoded command returns an error matching `ErrNotHandled`.
+
+The decoder owns application validation and malformed-payload policy. The SDK passes a non-nil, protocol-decoded `EncryptedData` pointer and does not impose a second codec or reinterpret its TLVs. A typed nil `*EncryptedData` is rejected as `ErrInvalidMessageForm` by the outer DGP dispatch boundary before the decoder runs. Decoder panics are recovered by that same dispatch safety boundary as `*PanicError` matching `ErrHandlerPanic`.
+
+The command router freezes on its first dispatch; finish command and group registration before serving. This keeps server composition to a typed DGP route plus an application-owned decoder and command handlers, without adding codec configuration to `Server`.
 
 ## Groups
 
