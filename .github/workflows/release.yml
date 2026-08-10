@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v7
@@ -66,7 +66,7 @@ jobs:
       - name: Verify checksums
         run: make verify-release DIST_DIR=dist
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: api_datagram-${{ github.event_name == 'push' && github.ref_name || inputs.version }}
           path: dist/*
@@ -83,7 +83,7 @@ jobs:
       contents: write
     steps:
       - name: Download verified artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: api_datagram-${{ github.ref_name }}
           path: dist
