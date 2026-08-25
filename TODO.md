@@ -16,7 +16,7 @@ The earlier roadmap had sound safety goals, but left too much architecture for i
 - Testing still required crypto/TCP because there was no in-memory dispatch/recorder seam.
 - Ten feature phases mixed essential MVP design with a large optional middleware/observability catalog.
 
-The contract below closes those gaps. The implemented owner decisions are recorded below; remaining API reconciliation is tracked in Phase A.
+The contract below closes those gaps. The implemented owner decisions and API reconciliation are recorded below.
 
 ## Future application payload format (deferred; not normative MVP)
 
@@ -28,28 +28,31 @@ The contract below closes those gaps. The implemented owner decisions are record
 
 ```go
 type Handler interface {
-    HandleDGP(*Context, any) error
+    Handle(*Context, any) error
 }
 
 type HandlerFunc func(*Context, any) error
-func (f HandlerFunc) HandleDGP(c *Context, m any) error
+func (f HandlerFunc) Handle(c *Context, m any) error
 
-type TypedHandlerFunc[T any] func(*Context, *T) error
+type ApplicationMessage interface {
+    dgpv1.EncryptedData | dgpv1.Ack | dgpv1.ErrorMessage
+}
+type TypedHandlerFunc[T ApplicationMessage] func(*Context, *T) error
 type Middleware func(Handler) Handler
 
 // Generic methods are unavailable in Go; use a package function.
-func Handle[T any](r *Router, h TypedHandlerFunc[T]) error
+func Handle[T ApplicationMessage](r *Router, h TypedHandlerFunc[T]) error
+func RegisterTyped[T ApplicationMessage](r *Router, h TypedHandlerFunc[T]) error
 
 func (r *Router) Use(...Middleware) error
 func (r *Router) HandleEncryptedData(TypedHandlerFunc[dgpv1.EncryptedData]) error
 func (r *Router) HandleAck(TypedHandlerFunc[dgpv1.Ack]) error
 func (r *Router) HandleError(TypedHandlerFunc[dgpv1.ErrorMessage]) error
-func (r *Router) NotFound(Handler) error
 ```
 
 `Router{}` is ready for registration. `Handle[T]` accepts only the closed inbound application-visible set `dgpv1.EncryptedData`, `dgpv1.Ack`, and `dgpv1.ErrorMessage`; pointer type arguments, unsupported types, nil handlers, and duplicates return configuration errors. Ping/pong, close, and rekey remain runtime-owned in MVP. The checked assertion lives in the adapter, never in application handlers.
 
-Registration is ordered, is not concurrency-safe, and is legal only before serving. Duplicate routes return `ErrRouteConflict`; there is no implicit replacement. The default unhandled route returns `ErrNotHandled`, which is observed but is nonfatal.
+Registration is ordered, is not concurrency-safe, and is legal only before serving. Duplicate routes return `ErrDuplicateHandler`; there is no implicit replacement. The default unhandled route returns `ErrNotHandled`, which is observed but is nonfatal.
 
 The module declares Go 1.25, so generic type declarations/functions are available. A generic registration function is the practical alternative to an impossible generic `Server` method.
 
@@ -63,7 +66,9 @@ func run(ctx context.Context, ln net.Listener, key dgpv1.StaticKey) error {
             StreamID: m.StreamID, AppMessageType: m.AppMessageType, Fields: m.Fields,
         })
     })
-    s, err := dgpserver.New(dgpserver.Config{StaticKey: key, Handler: r})
+    s, err := dgpserver.New(dgpserver.Config{
+        DGP: dgpv1.ServerConfig{StaticKey: key}, Router: r,
+    })
     if err != nil {
         return err
     }
@@ -78,22 +83,13 @@ Full examples must check registration errors; the compact example ignores only a
 
 ```go
 type Config struct {
-    StaticKey               dgpv1.StaticKey
-    Handler                 Handler
-    Authenticator           Authenticator
-    ErrorHandler            ErrorHandler
-    OnConnect               ConnectHook
-    OnDisconnect            DisconnectHook
-    HandshakeTimeout        time.Duration
-    ReadTimeout             time.Duration
-    WriteTimeout            time.Duration
-    IdleTimeout             time.Duration
-    KeepaliveInterval       time.Duration
-    KeepaliveTimeout        time.Duration
-    OutboundQueue           int
-    HandlerQueue            int
-    MaxConcurrentHandshakes int
-    MaxActiveConnections    int
+    DGP               dgpv1.ServerConfig
+    Router            *Router
+    Authenticator     Authenticator
+    ErrorHandler      ErrorHandler
+    OnConnect         func(context.Context, ConnectionInfo) error
+    OnDisconnect      func(context.Context, ConnectionInfo, error)
+    DisconnectTimeout time.Duration
 }
 
 func New(Config) (*Server, error)
@@ -115,47 +111,47 @@ Lifecycle rules:
 ### Request context, peer, and ownership
 
 ```go
-type Context struct { /* unexported */ }
-func (c *Context) Context() context.Context
+type Context struct {
+    context.Context
+    // other fields are unexported
+}
 func (c *Context) Peer() Peer
 func (c *Context) Principal() Principal
-func (c *Context) MessageType() dgpv1.MessageType
 func (c *Context) Params() Params
 func (c *Context) Metadata() Metadata
 func (c *Context) TrySend(any) error
-func (c *Context) Send(context.Context, any) error
-func (c *Context) SendAndWait(context.Context, any) error
-func (c *Context) Close(code uint16, reason string) error
+func (c *Context) Send(any) error
+func (c *Context) SendAndWait(any) error
+func (c *Context) Close() error
 
-type Peer struct {
-    StaticKey   [32]byte
-    SessionID   [16]byte
-    RemoteAddr  net.Addr
-    ConnectedAt time.Time
-}
+type Peer struct { /* unexported */ }
+func NewPeer(address string, sessionID [16]byte, identity []byte) Peer
+func (p Peer) Address() string
+func (p Peer) SessionID() [16]byte
+func (p Peer) Identity() []byte
 
-type Params struct {
-    Command  Command
-    StreamID uint16
-}
+type Params struct { /* unexported */ }
+func NewParams(map[string]string) Params
+func (p Params) Get(string) (string, bool)
+func (p Params) All() map[string]string
 
-type Metadata struct {
-    ReceivedAt time.Time
-    MessageType dgpv1.MessageType
-}
+type Metadata struct { /* unexported */ }
+func NewMetadata(dgpv1.MessageType, time.Time) Metadata
+func (m Metadata) MessageType() dgpv1.MessageType
+func (m Metadata) ReceivedAt() time.Time
 ```
 
 `Context` is one inbound invocation. Its Go context derives from the connection and is canceled on disconnect/shutdown. It is not a service locator: no `Set/Get`, global bag, raw `*dgpv1.Connection`, `Session`, frame, or traffic secrets. Dependencies are captured in typed closures.
 
-Peer, principal, params, and metadata are immutable snapshots. Accessors clone slices; `RemoteAddr` is read-only. Inbound messages and nested slices are valid for the handler call and must be copied before retention/mutation. An outbound message must not be mutated while a send call is in progress.
+Peer, principal, params, and metadata are immutable snapshots. Accessors clone slices; peer identity bytes are defensively copied. Inbound messages and nested slices are valid for the handler call and must be copied before retention/mutation. An outbound message must not be mutated while a send call is in progress.
 
 ### Backpressure: queued versus written
 
-- `TrySend` is nonblocking. Success means accepted into the bounded per-connection FIFO; full returns `ErrQueueFull`.
-- `Send(ctx, m)` waits for bounded queue capacity. Success still means **queued**, not written; cancellation wraps `ctx.Err()`.
-- `SendAndWait(ctx, m)` waits until the frame and any preceding automatic rekey are fully written. It does not mean peer receipt or business acknowledgement.
+- `TrySend` is nonblocking. Success means accepted into the bounded per-connection FIFO; full returns `dgpv1.ErrOutboundQueueFull`.
+- `Send(m)` waits for bounded queue capacity using the embedded handler context. Success still means **queued**, not written; cancellation returns that context error.
+- `SendAndWait(m)` uses the embedded handler context and waits until the frame and any preceding automatic rekey are fully written. It does not mean peer receipt or business acknowledgement.
 - Concurrent sends are ordered by successful queue admission; no stronger ordering is promised.
-- Sends after cancellation and all sends from `OnDisconnect` return `ErrConnectionClosed`.
+- Once connection termination wins, sends return `dgpv1.ErrConnectionClosed`; a receive-only or disconnect context has no send capability and returns `ErrRecorderClosed`.
 - `Close` uses a dedicated control path and is not trapped behind a full application queue.
 - Inbound handler-queue overflow remains terminal; queues are never unbounded and messages are never silently dropped.
 
@@ -202,33 +198,25 @@ Groups are registration-time policy scopes, justified for authorization, logging
 ```go
 type ErrorKind uint8
 const (
-    ErrorUnknown ErrorKind = iota
-    ErrorBadMessage
-    ErrorUnauthorized
-    ErrorForbidden
-    ErrorNotHandled
-    ErrorOverloaded
-    ErrorInternal
+    ErrorKindHandler ErrorKind = iota + 1
+    ErrorKindPanic
 )
 
 type HandlerError struct {
-    Kind  ErrorKind
-    Code  uint16
-    Err   error
-    Fatal bool
+    Kind ErrorKind
+    Err  error
 }
 func (e *HandlerError) Error() string
 func (e *HandlerError) Unwrap() error
 
-type ErrorHandler interface { HandleError(*Context, error) }
-type ErrorHandlerFunc func(*Context, error)
+type ErrorHandler func(*Context, error) error
 
-type OpError struct { Op string; Peer Peer; Err error }
+type OpError struct { Op string; Err error }
 func (e *OpError) Error() string
 func (e *OpError) Unwrap() error
 ```
 
-Sentinels: `ErrServerStarted`, `ErrServerClosed`, `ErrRouteConflict`, `ErrNotHandled`, `ErrQueueFull`, `ErrConnectionClosed`, `ErrUnauthorized`, and `ErrHandlerPanic`. Sensitive identity is excluded from formatted error strings. All errors remain usable with `errors.Is/As`.
+Sentinels: `ErrServerStarted`, `ErrDuplicateHandler`, `ErrNilHandler`, `ErrUnsupportedMessage`, `ErrInvalidMessageForm`, `ErrNotHandled`, `ErrHandlerPanic`, `ErrRecorderFull`, `ErrRecorderClosed`, and `ErrUnauthenticated`; transport queue/connection errors remain in `dgpv1`. Sensitive identity is excluded from formatted error strings. All errors remain usable with `errors.Is/As`.
 
 Returned handler/decoder errors reach the single configured `ErrorHandler` exactly once. Default policy: observe and continue for `ErrNotHandled`; sanitize and optionally send `dgpv1.ErrorMessage` for nonfatal `*HandlerError`; close one connection for fatal errors, invariant failures, and panics. Never send raw internal/authentication errors.
 
@@ -239,8 +227,8 @@ func requestLog(log *slog.Logger) dgpserver.Middleware {
     return func(next dgpserver.Handler) dgpserver.Handler {
         return dgpserver.HandlerFunc(func(c *dgpserver.Context, m any) error {
             started := time.Now()
-            err := next.HandleDGP(c, m)
-            log.InfoContext(c.Context(), "dgp", "type", c.MessageType(),
+            err := next.Handle(c, m)
+            log.InfoContext(c, "dgp", "type", c.Metadata().MessageType(),
                 "duration", time.Since(started), "err", err)
             return err
         })
@@ -252,10 +240,11 @@ func requestLog(log *slog.Logger) dgpserver.Middleware {
 
 ```go
 type Credentials struct {
-    StaticKey  [32]byte
-    RemoteAddr net.Addr
+    PeerStatic [32]byte
+    SessionID  [16]byte
+    RemoteAddr string
 }
-type Principal interface { ID() string }
+type Principal any
 type Authenticator interface {
     Authenticate(context.Context, Credentials) (Principal, error)
 }
@@ -264,15 +253,20 @@ type AuthenticatorFunc func(context.Context, Credentials) (Principal, error)
 
 Noise first authenticates the client static key. The SDK then calls `Authenticator` while admission capacity is held but before active registration, hooks, or application dispatch. Nil authenticator admits every cryptographically valid peer with nil principal and must be called out in production documentation. Supply a static-key allowlist adapter.
 
-Rejection maps locally to `ErrUnauthorized`, closes without policy details, and invokes neither hook. Principal is immutable and exposed through `Context.Principal`; authorization is middleware with closure-injected policy.
+Rejection maps locally to `ErrUnauthenticated`, closes without policy details, and invokes neither hook. Principal is immutable and exposed through `Context.Principal`; authorization is middleware with closure-injected policy.
 
 The low-level seam should expose only completed-handshake peer public key/session identity to the adapter—never mutable `Session` or handshake/traffic secrets.
 
 ### Hooks: exact ordering and exactly once
 
 ```go
-type ConnectHook func(context.Context, ConnectionInfo) error
-type DisconnectHook func(context.Context, ConnectionInfo, error)
+type ConnectionInfo struct {
+    Peer      Peer
+    Principal Principal
+}
+// Config uses these function signatures directly:
+// OnConnect func(context.Context, ConnectionInfo) error
+// OnDisconnect func(context.Context, ConnectionInfo, error)
 ```
 
 For each transport: finish Noise → authenticate → reserve/register active connection and create context → call `OnConnect` once → dispatch serially → stop new handlers and cancel connection context → wait for current handler → call `OnDisconnect` once with terminal cause and a detached timeout-bounded cleanup context → release slot.
@@ -283,10 +277,11 @@ Authentication rejection invokes neither hook. Once active registration succeeds
 
 ```go
 type Recorder struct { /* concurrency-safe */ }
-func NewRecorder(Peer, Principal) *Recorder
-func (r *Recorder) Context(context.Context) *Context
-func (r *Recorder) Sent() []any
-func (r *Recorder) Closed() (code uint16, reason string, ok bool)
+func NewRecorder(capacity int) *Recorder
+func (r *Recorder) NewContext(context.Context, Peer, Metadata, Params) *Context
+func (r *Recorder) Snapshot() []RecordedSend
+func (r *Recorder) Drain() []RecordedSend
+func (r *Recorder) Close() error
 func Dispatch(context.Context, Handler, Peer, Principal, any) error
 ```
 
@@ -294,10 +289,10 @@ func Dispatch(context.Context, Handler, Peer, Principal, any) error
 
 ```go
 func TestEcho(t *testing.T) {
-    rec := dgpserver.NewRecorder(dgpserver.Peer{}, nil)
-    c := rec.Context(context.Background())
+    rec := dgpserver.NewRecorder(1)
+    c := rec.NewContext(context.Background(), dgpserver.Peer{}, dgpserver.Metadata{}, dgpserver.Params{})
     err := echo(c, &dgpv1.EncryptedData{AppMessageType: 1})
-    if err != nil || len(rec.Sent()) != 1 { t.Fatal(err) }
+    if err != nil || len(rec.Snapshot()) != 1 { t.Fatal(err) }
 }
 ```
 
@@ -311,29 +306,29 @@ Static-analysis audit: the repository and CI use golangci-lint v2 configuration,
 
 ### Phase A — contract and low-level seams
 
-- [ ] Approve the remaining public-contract decisions and add compile-only API examples.
+- [x] Approve the remaining public-contract decisions and add compile-only API examples.
   - [x] Implementation has selected behavior for local write completion, context-driven serving, nil authentication, error observation, and disconnect timeout.
-  - [ ] Reconcile the frozen contract/examples with the implemented API (`Config.DGP`, embedded `Context`, send signatures, error names, and hook/auth types).
+  - [x] Reconcile the frozen contract/examples with the implemented API (`Config.DGP`, embedded `Context`, send signatures, error names, and hook/auth types).
   - [x] Add the contract-level generic `Handle` function, typed router registration methods, and compiling router/command-router examples while preserving `RegisterTyped`.
 - [x] Add a narrow completed-handshake admission value/callback exposing peer public key, session ID, and address; preserve existing `dgpv1.Server` callers.
 - [x] Add context-aware queue admission and write completion internally/compatibly to `dgpv1.Connection`; keep `Connection.Send` unchanged.
 - [x] Define and test a precedence table for simultaneous transport, handler, local close, and shutdown terminal causes.
 
-**Acceptance:** low-level seams and compatibility are implemented and current tests pass, but Phase A remains open until the frozen public contract and examples are reconciled with the implemented API.
+**Acceptance:** low-level seams and compatibility are implemented and current tests pass, and the frozen public contract and compile-only examples now match the implemented API.
 
 ### Phase B — router, context, errors, and unit seam
 
 - [ ] Complete handler types, typed adapters, frozen routing, command routing/groups, middleware compilation, `Context`, immutable metadata, recorder, and dispatch helper.
   - [x] Handler/middleware types, closed-set typed registration, frozen DGP routing, narrow `Context`, defensive snapshots, and a bounded recorder are implemented.
   - [x] Add the codec-neutral SDK command router/groups.
-  - [x] Add the contract-level dispatch helper. Remaining API/error-policy reconciliation is tracked in Phase A.
+  - [x] Add the contract-level dispatch helper; API and error-policy reconciliation is complete in Phase A.
 - [ ] Complete unit coverage for duplicates, wrong generic forms, middleware order/short-circuit, decoder failures, panic recovery, ownership, and send semantics.
   - [x] Tests cover DGP-route duplication/type form, freeze behavior, middleware order/short-circuit, panic conversion, defensive copying, recorder bounds/cancellation, and low-level queue/write semantics.
   - [x] Add decoder/group coverage for command routing.
   - [x] Add explicit coverage for middleware calling `next` twice.
-  - [ ] Reconcile remaining API semantics in Phase A.
+  - [x] Reconcile remaining API semantics in Phase A.
 
-**Acceptance:** typed DGP and command handlers plus in-memory tests work without crypto/network; broader public API reconciliation remains tracked in Phase A.
+**Acceptance:** typed DGP and command handlers plus in-memory tests work without crypto/network; public API reconciliation is complete in Phase A.
 
 ### Phase C — admission, hooks, and runtime lifecycle
 
@@ -371,7 +366,7 @@ Static-analysis audit: the repository and CI use golangci-lint v2 configuration,
 
 The current code is sufficient to begin MVP messenger application development: DGPv1 framing/Noise/session behavior is implemented; the high-level server authenticates and exposes a principal; typed DGP messages support bounded sends; graceful shutdown exists; and real-TCP integration plus the migrated service exercise the main path.
 
-This is not production-release readiness. Before production, reconcile the frozen public contract with the implemented API and finish automatic-rekey/abnormal-exit coverage plus race/leak/stress/fuzz/release evidence. The race gate remains open because the required run was not possible with the earlier CGO/toolchain.
+This is not production-release readiness. Before production, finish automatic-rekey/abnormal-exit coverage plus race/leak/stress/fuzz/release evidence. The race gate remains open because the required run was not possible with the earlier CGO/toolchain.
 
 ### Production-readiness progress estimate
 
