@@ -12,13 +12,15 @@ SOURCE_DATE_EPOCH ?=
 BINARY := bin/api_datagram
 RELEASE_BINARY := ./cmd/api_datagram
 COVERAGE_PACKAGES := ./internal/... ./pkg/...
-BENCHMARK_PACKAGE := ./pkg/dgpv1
+BENCHMARK_PACKAGE := github.com/datagram-messenger/protocol
 BENCHMARK_REGEX := ^BenchmarkMessengerWireFormats$$
 BENCHMARK_RESULTS := benchmarks/results
 MODULE := github.com/tr1xdev/datagram-server
 RELEASE_TARGETS := linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64
+SBOM_TOOL := github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
+SBOM_FILE ?= sbom.cdx.json
 
-.PHONY: help build test coverage benchmark release verify-release clean check-go check-release-tools check-version
+.PHONY: help build test coverage benchmark sbom release verify-release clean check-go check-release-tools check-version
 
 help: ## Show this help.
 	@echo Usage: make ^<target^> [VARIABLE=value]
@@ -29,6 +31,7 @@ help: ## Show this help.
 	@echo   test             Run all Go tests.
 	@echo   coverage         Run coverage and enforce COVERAGE_THRESHOLD.
 	@echo   benchmark        Run benchmarks and save result files.
+	@echo   sbom             Generate a pinned CycloneDX dependency inventory.
 	@echo   release          Build cross-platform release archives.
 	@echo   verify-release   Verify checksums in DIST_DIR.
 	@echo   clean            Remove generated files.
@@ -67,11 +70,14 @@ coverage: check-go ## Run core-package coverage and enforce COVERAGE_THRESHOLD.
 	}
 
 benchmark: check-go ## Run wire-format benchmarks and save the raw result files.
-	@[[ -f go.mod && -d pkg/dgpv1 && -d benchmarks ]] || { echo "run make from the repository root" >&2; exit 1; }
+	@[[ -f go.mod && -d benchmarks ]] || { echo "run make from the repository root" >&2; exit 1; }
 	@mkdir -p '$(BENCHMARK_RESULTS)'
 	@go version > '$(BENCHMARK_RESULTS)/go-version.txt'
 	@go test $(BENCHMARK_PACKAGE) -run '^$$' -bench '$(BENCHMARK_REGEX)' -benchmem -benchtime '$(BENCHTIME)' -count '$(COUNT)' | tee '$(BENCHMARK_RESULTS)/latest.txt'
 	@go test $(BENCHMARK_PACKAGE) -run '^$$' -bench '$(BENCHMARK_REGEX)' -benchmem -benchtime '$(BENCHTIME)' -count '$(COUNT)' -json > '$(BENCHMARK_RESULTS)/latest.jsonl'
+
+sbom: check-go ## Generate a pinned CycloneDX dependency inventory.
+	go run $(SBOM_TOOL) app -json -licenses -main cmd/api_datagram -output '$(SBOM_FILE)' .
 
 # Release archives use stable ordering, ownership, timestamps, and gzip headers
 # so identical source inputs produce identical artifacts.
@@ -104,5 +110,5 @@ verify-release: ## Verify archive checksums in DIST_DIR.
 	@command -v sha256sum >/dev/null 2>&1 || { echo "required tool not found: sha256sum" >&2; exit 1; }
 	cd '$(DIST_DIR)' && sha256sum --check SHA256SUMS
 
-clean: ## Remove local build, coverage, and release outputs.
-	rm -rf bin '$(DIST_DIR)' '$(COVERAGE_PROFILE)'
+clean: ## Remove local build, coverage, release, and SBOM outputs.
+	rm -rf bin '$(DIST_DIR)' '$(COVERAGE_PROFILE)' '$(SBOM_FILE)'

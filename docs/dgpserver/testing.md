@@ -119,12 +119,12 @@ go test ./pkg/dgpserver -run '^(TestCommandRouterDecoderFailureContract|TestComm
 go test ./pkg/dgpserver -run '^$' -fuzz '^FuzzCommandRouterDecoderPaths$' -fuzztime=2s
 ```
 
-The SDK remains codec-neutral: malformed application payloads are whatever the injected decoder rejects. Protocol-level `EncryptedData` parsing remains owned and tested by `pkg/dgpv1`; the command router neither reparses nor adds a server codec setting. Concurrent shutdown/send races remain a separate open release gate.
+The SDK remains codec-neutral: malformed application payloads are whatever the injected decoder rejects. Protocol-level `EncryptedData` parsing remains owned and tested by `github.com/datagram-messenger/protocol`; the command router neither reparses nor adds a server codec setting. Concurrent shutdown/send races remain a separate open release gate.
 
 ## Shutdown/send concurrency properties
 
 The deterministic property matrix covers `TrySend`, context-aware queued `Send`, and `SendAndWait` against close with ordered and simultaneous starts. Explicit channels establish barriers; the only timeout is a bounded deadlock guard. It verifies terminal rejection, caller-context precedence before termination, completion waiter release, concurrent close idempotence, stable terminal cause, and that control close is not queued behind a full application queue. SDK tests also cover handler cancellation, disconnect-context send rejection, and concurrent server `Shutdown`/`Close` before `Serve`.
 
 ```sh
-go test ./pkg/dgpserver ./pkg/dgpv1 -run 'Test(ContextSendCancellationAndDisconnectProperties|ConcurrentServerShutdownAndCloseBeforeServe|SendShutdownStateMachineProperties|FullQueueWaitersAndControlCloseProperties|ConcurrentCloseIsIdempotentAndTerminalCauseStable|SendCancellationPrecedenceBeforeTerminalState)$' -count=20
+go test ./pkg/dgpserver github.com/datagram-messenger/protocol -run 'Test(ContextSendCancellationAndDisconnectProperties|ConcurrentServerShutdownAndCloseBeforeServe|SendShutdownStateMachineProperties|FullQueueWaitersAndControlCloseProperties|ConcurrentCloseIsIdempotentAndTerminalCauseStable|SendCancellationPrecedenceBeforeTerminalState)$' -count=20
 ```

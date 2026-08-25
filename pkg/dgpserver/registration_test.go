@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tr1xdev/datagram-server/pkg/dgpv1"
+	"github.com/datagram-messenger/protocol"
 )
 
 func TestContractRegistrationHelpers(t *testing.T) {

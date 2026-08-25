@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tr1xdev/datagram-server/pkg/dgpv1"
+	"github.com/datagram-messenger/protocol"
 )
 
 func TestContextSendCancellationAndDisconnectProperties(t *testing.T) {
