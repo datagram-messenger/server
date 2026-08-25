@@ -94,7 +94,9 @@ On success, the server logs its bound TCP address. The default is all interfaces
 
 ## Continuous integration
 
-GitHub Actions runs formatting, module tidiness/verification, vet, builds every command, unit/integration tests, the Linux race detector, coverage, golangci-lint, govulncheck, and repository-history secret scanning for pushes and pull requests to `main`. The workflow has read-only repository permissions and does not pass secrets to pull-request code.
+GitHub Actions runs formatting, module tidiness/verification, vet, builds every command, unit/integration tests, the Linux race detector, coverage, golangci-lint, govulncheck, CycloneDX SBOM generation, and repository-history secret scanning for pushes and pull requests to `main`. The workflow has read-only repository permissions and does not pass secrets to pull-request code.
+
+Generate the application dependency inventory locally with `make sbom`; the pinned generator writes `sbom.cdx.json` by default. CI uploads that CycloneDX JSON artifact for 14 days. Review it together with `go.mod`, `go.sum`, the `govulncheck` result, and the [dependency review](docs/dependency-review.md) before a release. The SBOM is evidence for dependency review, not a vulnerability assessment by itself.
 
 Coverage measures `./internal/...` and `./pkg/...` at an 85% minimum; command entrypoints are transparently excluded because they are wiring or placeholders. Run the same check on Ubuntu with GNU Make using `make coverage`; override settings with `COVERAGE_THRESHOLD` and `COVERAGE_PROFILE`. The generated `coverage.out` is uploaded for 14 days.
 
