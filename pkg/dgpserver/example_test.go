@@ -7,8 +7,8 @@ import (
 	"net"
 	"time"
 
+	"github.com/datagram-messenger/protocol"
 	"github.com/tr1xdev/datagram-server/pkg/dgpserver"
-	"github.com/tr1xdev/datagram-server/pkg/dgpv1"
 )
 
 func Example() {

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tr1xdev/datagram-server/pkg/dgpv1"
+	"github.com/datagram-messenger/protocol"
 )
 
 // ConnectionInfo is an immutable snapshot supplied to lifecycle hooks.

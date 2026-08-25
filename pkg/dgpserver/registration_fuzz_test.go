@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tr1xdev/datagram-server/pkg/dgpv1"
+	"github.com/datagram-messenger/protocol"
 )
 
 var fuzzHandler = HandlerFunc(func(*Context, any) error { return nil })

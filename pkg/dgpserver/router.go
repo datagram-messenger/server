@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/tr1xdev/datagram-server/pkg/dgpv1"
+	"github.com/datagram-messenger/protocol"
 )
 
 // Handler handles one application-visible DGP message.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/tr1xdev/datagram-server/pkg/dgpv1"
+	"github.com/datagram-messenger/protocol"
 )
 
 // Peer is an immutable snapshot of the authenticated remote peer.
