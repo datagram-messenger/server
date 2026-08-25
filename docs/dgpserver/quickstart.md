@@ -11,7 +11,7 @@ import (
     "time"
 
     "github.com/tr1xdev/datagram-server/pkg/dgpserver"
-    "github.com/tr1xdev/datagram-server/pkg/dgpv1"
+    "github.com/datagram-messenger/protocol"
 )
 
 func serve(ctx context.Context, ln net.Listener, serverKey dgpv1.StaticKey, clientKey [32]byte) error {

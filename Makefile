@@ -12,7 +12,7 @@ SOURCE_DATE_EPOCH ?=
 BINARY := bin/api_datagram
 RELEASE_BINARY := ./cmd/api_datagram
 COVERAGE_PACKAGES := ./internal/... ./pkg/...
-BENCHMARK_PACKAGE := ./pkg/dgpv1
+BENCHMARK_PACKAGE := github.com/datagram-messenger/protocol
 BENCHMARK_REGEX := ^BenchmarkMessengerWireFormats$$
 BENCHMARK_RESULTS := benchmarks/results
 MODULE := github.com/tr1xdev/datagram-server
@@ -67,7 +67,7 @@ coverage: check-go ## Run core-package coverage and enforce COVERAGE_THRESHOLD.
 	}
 
 benchmark: check-go ## Run wire-format benchmarks and save the raw result files.
-	@[[ -f go.mod && -d pkg/dgpv1 && -d benchmarks ]] || { echo "run make from the repository root" >&2; exit 1; }
+	@[[ -f go.mod && -d benchmarks ]] || { echo "run make from the repository root" >&2; exit 1; }
 	@mkdir -p '$(BENCHMARK_RESULTS)'
 	@go version > '$(BENCHMARK_RESULTS)/go-version.txt'
 	@go test $(BENCHMARK_PACKAGE) -run '^$$' -bench '$(BENCHMARK_REGEX)' -benchmem -benchtime '$(BENCHTIME)' -count '$(COUNT)' | tee '$(BENCHMARK_RESULTS)/latest.txt'

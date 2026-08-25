@@ -1,6 +1,6 @@
 # Building applications with `dgpserver`
 
-`pkg/dgpserver` is the application-facing server layer above [`pkg/dgpv1`](../../pkg/dgpv1/doc.go). It owns typed application dispatch, command routing, middleware, admission, principals, lifecycle hooks, bounded sends, and test seams. `pkg/dgpv1` continues to own TCP framing, Noise XX, encryption, replay protection, rekeying, keepalives, and connection I/O.
+`pkg/dgpserver` is the application-facing server layer above [`github.com/datagram-messenger/protocol`](https://github.com/datagram-messenger/protocol). It owns typed application dispatch, command routing, middleware, admission, principals, lifecycle hooks, bounded sends, and test seams. `github.com/datagram-messenger/protocol` owns TCP framing, Noise XX, encryption, replay protection, rekeying, keepalives, and connection I/O.
 
 Use this guide when building a service on DGPv1. Read the [normative protocol specification](../protocol/dgp-v1.md) when implementing another peer or reasoning about wire compatibility.
 
