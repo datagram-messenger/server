@@ -17,7 +17,8 @@ BENCHMARK_REGEX := ^BenchmarkMessengerWireFormats$$
 BENCHMARK_RESULTS := benchmarks/results
 MODULE := github.com/tr1xdev/datagram-server
 RELEASE_TARGETS := linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64
-SBOM_TOOL := github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
+# v1.10.0 is the latest cyclonedx-gomod release compatible with Go 1.25.
+SBOM_TOOL := github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
 SBOM_FILE ?= sbom.cdx.json
 
 .PHONY: help build test coverage benchmark sbom release verify-release clean check-go check-release-tools check-version
