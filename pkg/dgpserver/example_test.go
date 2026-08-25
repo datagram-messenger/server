@@ -119,6 +119,17 @@ func ExampleNewStaticKeyAllowlist() {
 }
 
 func ExampleServer_Shutdown() {
+	contextCapabilities := func(ctx *dgpserver.Context, message any) error {
+		var embedded context.Context = ctx
+		_ = embedded
+		if err := ctx.Send(message); err != nil {
+			return err
+		}
+		if err := ctx.SendAndWait(message); err != nil {
+			return err
+		}
+		return ctx.Close()
+	}
 	configure := func(listener net.Listener, serverKey dgpv1.StaticKey, clientKey [32]byte) error {
 		server, err := dgpserver.New(dgpserver.Config{
 			DGP: dgpv1.ServerConfig{
@@ -129,6 +140,16 @@ func ExampleServer_Shutdown() {
 				HandlerQueue:     64,
 			},
 			Authenticator: dgpserver.NewStaticKeyAllowlist(map[[32]byte]dgpserver.Principal{clientKey: "alice"}),
+			ErrorHandler: func(_ *dgpserver.Context, err error) error {
+				return err
+			},
+			OnConnect: func(_ context.Context, info dgpserver.ConnectionInfo) error {
+				_ = info.Peer
+				return nil
+			},
+			OnDisconnect: func(_ context.Context, info dgpserver.ConnectionInfo, err error) {
+				_, _ = info.Principal, err
+			},
 		})
 		if err != nil {
 			return err
@@ -142,6 +163,7 @@ func ExampleServer_Shutdown() {
 		}
 		return <-serveDone
 	}
+	_ = contextCapabilities
 	_ = configure
 	_ = errors.Is
 }
