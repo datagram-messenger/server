@@ -71,15 +71,18 @@ type Server struct {
 	config Config
 	router *Router
 
-	mu         sync.Mutex
-	core       *dgpv1.Server
-	listener   net.Listener
-	started    bool
-	stopping   bool
-	closed     bool
-	serveDone  chan struct{}
-	serveError error
-	states     sync.Map
+	mu               sync.Mutex
+	core             *dgpv1.Server
+	listener         net.Listener
+	started          bool
+	stopping         bool
+	closed           bool
+	serveDone        chan struct{}
+	serveError       error
+	coreCloseDone    chan struct{}
+	coreCloseStarted bool
+	coreCloseError   error
+	states           sync.Map
 }
 
 type connectionState struct {
@@ -110,7 +113,12 @@ func New(config Config) (*Server, error) {
 	if config.DisconnectTimeout == 0 {
 		config.DisconnectTimeout = 5 * time.Second
 	}
-	return &Server{config: config, router: router, serveDone: make(chan struct{})}, nil
+	return &Server{
+		config:        config,
+		router:        router,
+		serveDone:     make(chan struct{}),
+		coreCloseDone: make(chan struct{}),
+	}, nil
 }
 
 // Router returns the server router for configuration before Serve.
@@ -152,14 +160,14 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	s.mu.Lock()
 	s.core = core
 	stopping := s.stopping
-	s.mu.Unlock()
 	if stopping {
-		_ = core.Close()
+		s.startCoreCloseLocked()
 	}
+	s.mu.Unlock()
 	go func() {
 		select {
 		case <-ctx.Done():
-			_ = core.Close()
+			s.startCoreClose()
 		case <-s.serveDone:
 		}
 	}()
@@ -181,65 +189,124 @@ func (s *Server) finishServe(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.serveError = err
+	if s.core == nil && !s.coreCloseStarted {
+		s.coreCloseStarted = true
+		close(s.coreCloseDone)
+	}
 	if !s.closed {
 		s.closed = true
 		close(s.serveDone)
 	}
 }
 
-// Shutdown starts graceful shutdown and waits for Serve and all admitted
-// connection hooks. At ctx expiration it force-closes network I/O and returns
-// an OpError wrapping ctx.Err without waiting for application code that ignores
-// cancellation.
+// Shutdown starts graceful shutdown and waits for both Serve and the single
+// underlying core Close operation. At ctx expiration it force-closes network I/O
+// and returns an OpError wrapping ctx.Err.
 func (s *Server) Shutdown(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
 	s.mu.Lock()
 	s.stopping = true
-	core, listener, started, done := s.core, s.listener, s.started, s.serveDone
-	if !started {
-		if !s.closed {
-			s.closed = true
-			close(done)
-		}
+	if !s.started {
+		s.finishWithoutCoreLocked()
 		s.mu.Unlock()
 		return nil
 	}
+	s.startCoreCloseLocked()
+	core, listener := s.core, s.listener
+	serveDone, closeDone := s.serveDone, s.coreCloseDone
 	s.mu.Unlock()
-	if core != nil {
-		go func() { _ = core.Close() }()
-	} else if listener != nil {
+
+	if core == nil && listener != nil {
 		_ = listener.Close()
 	}
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
+	if err := waitForLifecycle(ctx, serveDone, closeDone); err != nil {
 		if core != nil {
 			_ = core.Abort()
 		} else if listener != nil {
 			_ = listener.Close()
 		}
-		return &OpError{Op: "shutdown", Err: ctx.Err()}
+		return &OpError{Op: "shutdown", Err: err}
 	}
+	return s.coreCloseResult()
 }
 
-// Close immediately closes the listener and all active connections.
+// Close immediately starts the same idempotent core closure as Shutdown and
+// waits for it to complete.
 func (s *Server) Close() error {
 	s.mu.Lock()
 	s.stopping = true
-	core, listener := s.core, s.listener
-	if !s.started && !s.closed {
+	if !s.started {
+		s.finishWithoutCoreLocked()
+		s.mu.Unlock()
+		return nil
+	}
+	s.startCoreCloseLocked()
+	listener, closeDone := s.listener, s.coreCloseDone
+	if s.core == nil && listener != nil {
+		_ = listener.Close()
+	}
+	s.mu.Unlock()
+
+	<-closeDone
+	return s.coreCloseResult()
+}
+
+func (s *Server) startCoreClose() {
+	s.mu.Lock()
+	s.stopping = true
+	s.startCoreCloseLocked()
+	s.mu.Unlock()
+}
+
+// startCoreCloseLocked starts exactly one core.Close call once the core exists.
+// The caller must hold s.mu.
+func (s *Server) startCoreCloseLocked() {
+	if s.core == nil || s.coreCloseStarted {
+		return
+	}
+	s.coreCloseStarted = true
+	core := s.core
+	go func() {
+		err := core.Close()
+		s.mu.Lock()
+		s.coreCloseError = err
+		close(s.coreCloseDone)
+		s.mu.Unlock()
+	}()
+}
+
+// finishWithoutCoreLocked completes both barriers when serving never acquired a
+// core. The caller must hold s.mu.
+func (s *Server) finishWithoutCoreLocked() {
+	if !s.closed {
 		s.closed = true
 		close(s.serveDone)
 	}
-	s.mu.Unlock()
-	if core != nil {
-		return core.Close()
+	if !s.coreCloseStarted {
+		s.coreCloseStarted = true
+		close(s.coreCloseDone)
 	}
-	if listener != nil {
-		return listener.Close()
+}
+
+func (s *Server) coreCloseResult() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.coreCloseError
+}
+
+func waitForLifecycle(ctx context.Context, serveDone, closeDone <-chan struct{}) error {
+	for serveDone != nil || closeDone != nil {
+		select {
+		case <-serveDone:
+			serveDone = nil
+		case <-closeDone:
+			closeDone = nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	return nil
 }
@@ -308,7 +375,19 @@ func (s *Server) callDisconnect(state connectionState, cause error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.DisconnectTimeout)
 	defer cancel()
-	callDisconnectHook(s.config.OnDisconnect, ctx, ConnectionInfo{Peer: state.peer, Principal: state.principal}, cause)
+
+	// The hook invocation is isolated so user code that ignores ctx cannot retain
+	// the protocol core's connection accounting forever. After the timeout this
+	// goroutine is intentionally no longer server-owned and may outlive Server.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		callDisconnectHook(s.config.OnDisconnect, ctx, ConnectionInfo{Peer: state.peer, Principal: state.principal}, cause)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 func callAuthenticator(auth Authenticator, ctx context.Context, credentials Credentials) (principal Principal, err error) {

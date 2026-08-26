@@ -215,6 +215,178 @@ func TestServerConnectRejectAndPanicDisconnectExactlyOnce(t *testing.T) {
 	}
 }
 
+func TestGracefulShutdownWaitsForHandlerAndDisconnectHook(t *testing.T) {
+	serverKey, clientKey := fixedKey(t, 14), fixedKey(t, 15)
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	disconnectStarted := make(chan struct{})
+	releaseDisconnect := make(chan struct{})
+
+	srv, err := New(Config{
+		DGP: dgpv1.ServerConfig{StaticKey: serverKey, HandshakeTimeout: runtimeTimeout},
+		OnDisconnect: func(context.Context, ConnectionInfo, error) {
+			close(disconnectStarted)
+			<-releaseDisconnect
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RegisterTyped[dgpv1.EncryptedData](srv.Router(), func(*Context, *dgpv1.EncryptedData) error {
+		close(handlerStarted)
+		<-releaseHandler
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveResult := make(chan error, 1)
+	go func() { serveResult <- srv.Serve(context.Background(), ln) }()
+	tr, session := connectRuntimeClient(t, ln.Addr().String(), clientKey, serverKey)
+	defer tr.Close()
+	sendClientMessage(t, tr, session, dgpv1.EncryptedData{})
+	<-handlerStarted
+
+	shutdownResult := make(chan error, 1)
+	go func() { shutdownResult <- srv.Shutdown(context.Background()) }()
+	<-srv.serveDone
+	select {
+	case err := <-shutdownResult:
+		t.Fatalf("Shutdown returned while handler was running: %v", err)
+	default:
+	}
+
+	close(releaseHandler)
+	<-disconnectStarted
+	select {
+	case err := <-shutdownResult:
+		t.Fatalf("Shutdown returned while disconnect hook was running: %v", err)
+	default:
+	}
+
+	close(releaseDisconnect)
+	if err := <-shutdownResult; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-serveResult; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDisconnectTimeoutDetachesUncooperativeHook(t *testing.T) {
+	serverKey, clientKey := fixedKey(t, 16), fixedKey(t, 17)
+	hookStarted := make(chan struct{})
+	hookTimedOut := make(chan struct{})
+	releaseHook := make(chan struct{})
+	hookReturned := make(chan struct{})
+
+	srv, err := New(Config{
+		DGP:               dgpv1.ServerConfig{StaticKey: serverKey, HandshakeTimeout: runtimeTimeout},
+		DisconnectTimeout: 25 * time.Millisecond,
+		OnDisconnect: func(ctx context.Context, _ ConnectionInfo, _ error) {
+			defer close(hookReturned)
+			close(hookStarted)
+			<-ctx.Done()
+			close(hookTimedOut)
+			<-releaseHook
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveResult := make(chan error, 1)
+	go func() { serveResult <- srv.Serve(context.Background(), ln) }()
+	tr, _ := connectRuntimeClient(t, ln.Addr().String(), clientKey, serverKey)
+	_ = tr.Close()
+	<-hookStarted
+
+	shutdownResult := make(chan error, 1)
+	go func() { shutdownResult <- srv.Shutdown(context.Background()) }()
+	<-hookTimedOut
+	select {
+	case err := <-shutdownResult:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(runtimeTimeout):
+		t.Fatal("Shutdown remained blocked by timed-out disconnect hook")
+	}
+	select {
+	case <-hookReturned:
+		t.Fatal("uncooperative hook returned before its test barrier was released")
+	default:
+	}
+	close(releaseHook)
+	<-hookReturned
+	if err := <-serveResult; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConcurrentCloseAndShutdownShareLifecycleCompletion(t *testing.T) {
+	serverKey, clientKey := fixedKey(t, 18), fixedKey(t, 19)
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	srv, err := New(Config{DGP: dgpv1.ServerConfig{StaticKey: serverKey, HandshakeTimeout: runtimeTimeout}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RegisterTyped[dgpv1.EncryptedData](srv.Router(), func(*Context, *dgpv1.EncryptedData) error {
+		close(handlerStarted)
+		<-releaseHandler
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveResult := make(chan error, 1)
+	go func() { serveResult <- srv.Serve(context.Background(), ln) }()
+	tr, session := connectRuntimeClient(t, ln.Addr().String(), clientKey, serverKey)
+	defer tr.Close()
+	sendClientMessage(t, tr, session, dgpv1.EncryptedData{})
+	<-handlerStarted
+
+	const callers = 16
+	start := make(chan struct{})
+	results := make(chan error, callers)
+	for i := range callers {
+		go func() {
+			<-start
+			if i%2 == 0 {
+				results <- srv.Close()
+				return
+			}
+			results <- srv.Shutdown(context.Background())
+		}()
+	}
+	close(start)
+	<-srv.serveDone
+	select {
+	case err := <-results:
+		t.Fatalf("lifecycle call returned before handler completion: %v", err)
+	default:
+	}
+	close(releaseHandler)
+	for range callers {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := <-serveResult; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestShutdownDeadlineEscalatesNetworkCancellation(t *testing.T) {
 	serverKey, clientKey := fixedKey(t, 5), fixedKey(t, 6)
 	started, release := make(chan struct{}), make(chan struct{})
