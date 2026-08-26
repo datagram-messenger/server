@@ -1,128 +1,179 @@
-# DGPv1 Datagram Server
+# Datagram Server
 
 [![Go CI](https://github.com/tr1xdev/datagram-server/actions/workflows/ci.yml/badge.svg)](https://github.com/tr1xdev/datagram-server/actions/workflows/ci.yml)
 
-Go implementation of the current DGPv1 MVP: a TCP server with a three-flight `Noise_XX_25519_ChaChaPoly_SHA256` handshake, encrypted DGPv1 sessions, replay protection, directional rekeying, keepalives, idle close, and graceful process shutdown.
+Datagram Server is the Go backend and server toolkit for DGPv1, Datagram's encrypted messaging protocol. The runnable `api_datagram` service provides authenticated TCP sessions using a three-flight `Noise_XX_25519_ChaChaPoly_SHA256` handshake, replay protection, directional rekeying, encrypted keepalives, idle-connection handling, and graceful shutdown.
 
-The normative wire protocol is documented in [`docs/protocol/dgp-v1.md`](docs/protocol/dgp-v1.md). Application and service developers should start with the [`dgpserver` developer guide](docs/dgpserver/README.md). Before a release, follow the [`DGPv1 pre-deployment checklist`](docs/pre-deployment-checklist.md).
+> DGPv1 is security-sensitive infrastructure. The [protocol specification](docs/protocol/dgp-v1.md) is the source of truth for wire behavior.
 
 ## Prerequisites
 
-- Go 1.25 or newer
-- A cryptographically random, persistent 32-byte server Noise static private key
+For development on Linux, install:
 
-## Configure the server
+- [Go 1.25 or newer](https://go.dev/doc/install)
+- Git
+- GNU Make for the repository targets
+- A C toolchain for race-detector runs (`go test -race`)
 
-`api_datagram` uses a typed Viper configuration layer. Precedence is explicit `-config` path, environment overrides, the selected/default YAML file, then secure defaults. Without `-config`, it searches `./config.yaml` and `./config/config.yaml`; a missing default file is allowed, while a missing explicit file fails startup. Unknown YAML fields fail loading.
+Release builds additionally require `tar`, `gzip`, `sha256sum`, and standard GNU command-line tools.
 
-Copy `config.example.yaml` to ignored `config.yaml`, replace placeholders locally, then run `go run ./cmd/api_datagram -config ./config.yaml`. `DGP_STATIC_KEY` must contain exactly 32 bytes encoded as 64 hexadecimal characters. YAML `peer_identities` is a map from a 64-hex Noise public key to a unique principal. The legacy `DGP_PEER_IDENTITIES=<key>=<principal>,...` override remains supported. Unknown peers are rejected; there is no permissive production default. Generate the static key once per server identity, store it in a secret manager, and reuse it across restarts. Do not commit it, paste it into logs, or use example material in production.
+## Quick start
 
-### Windows PowerShell
-
-Generate a key for the current process without writing it to disk:
-
-```powershell
-$key = [byte[]]::new(32)
-[System.Security.Cryptography.RandomNumberGenerator]::Fill($key)
-$env:DGP_STATIC_KEY = [Convert]::ToHexString($key).ToLowerInvariant()
-Remove-Variable key
-```
-
-To supply a key retrieved from your secret manager:
-
-```powershell
-$env:DGP_STATIC_KEY = '<64-hex-character-secret>'
-```
-
-### Platform-neutral
-
-Use your operating system or secret manager's cryptographically secure generator to create exactly 32 random bytes, hex-encode them as 64 characters, and export the stored value:
+Clone the repository and create a local configuration:
 
 ```sh
-export DGP_STATIC_KEY='<64-hex-character-secret>'
+git clone https://github.com/tr1xdev/datagram-server.git
+cd datagram-server
+cp config.example.yaml config.yaml
 ```
 
-> Never generate the key with a predictable random source. Avoid command-line arguments for real secrets because process listings and shell history may expose them.
+Edit the ignored `config.yaml` before starting the service:
 
-### Environment variables
+1. Replace the placeholder `static_key` with a persistent, cryptographically random 32-byte Noise private key encoded as 64 hexadecimal characters, or configure `static_key_file` instead.
+2. Replace the example entry under `peer_identities` with an authorized client's 64-character hexadecimal Noise public key and a unique principal name.
+3. Review the listen address and resource limits for your environment.
 
-| Variable | Required | Default | Validation / meaning |
-|---|---:|---:|---|
-| `DGP_STATIC_KEY` | Yes | — | Exactly 64 hex characters (32 decoded bytes). |
-| `DGP_ADDRESS` | No | `:8090` | TCP listen address accepted by Go `net.Listen`. |
-| `DGP_HANDSHAKE_TIMEOUT` | No | `10s` | Positive Go duration. |
-| `DGP_READ_TIMEOUT` | No | `0` | Positive Go duration; per-frame read deadline. |
-| `DGP_WRITE_TIMEOUT` | No | `10s` | Positive Go duration; per-frame write deadline and graceful-close allowance. |
-| `DGP_IDLE_TIMEOUT` | No | `2m` | Positive Go duration; closes a connection after no authenticated inbound frames. |
-| `DGP_KEEPALIVE_INTERVAL` | No | `30s` | Positive Go duration; interval for encrypted Ping frames. |
-| `DGP_KEEPALIVE_TIMEOUT` | No | `60s` | Positive Go duration; maximum wait for the matching Pong. |
-| `DGP_OUTBOUND_QUEUE` | No | `64` | Positive base-10 integer. |
-| `DGP_HANDLER_QUEUE` | No | `64` | Positive base-10 integer; pending per-connection handler work. |
-| `DGP_MAX_CONCURRENT_HANDSHAKES` | No | `64` | Positive base-10 integer; concurrent handshakes admitted. |
-| `DGP_MAX_ACTIVE_CONNECTIONS` | No | `1024` | Positive base-10 integer; authenticated connections retained. |
-
-Go duration examples include `500ms`, `15s`, and `2m`. Invalid configuration prevents startup and returns an error.
-
-## Run, build, and test
-
-### Windows PowerShell
-
-```powershell
-go test ./...
-go build -o .\bin\api_datagram.exe .\cmd\api_datagram
-Copy-Item .\config.example.yaml .\config.yaml
-# Edit the ignored config.yaml, then:
-go run .\cmd\api_datagram -config .\config.yaml
-# Environment values override YAML:
-$env:DGP_ADDRESS = '127.0.0.1:9090'
-go run .\cmd\api_datagram -config .\config.yaml
-```
-
-### Platform-neutral
+For local development, a key file can be generated with Linux's cryptographically secure random source:
 
 ```sh
-go test ./...
-go build -o ./bin/api_datagram ./cmd/api_datagram
-cp ./config.example.yaml ./config.yaml
-# Edit the ignored config.yaml, then:
+umask 077
+mkdir -p secrets
+head -c 32 /dev/urandom | od -An -v -tx1 | tr -d ' \n' > secrets/noise-static-key.hex
+```
+
+Then remove `static_key` from `config.yaml` and set:
+
+```yaml
+static_key_file: "./secrets/noise-static-key.hex"
+```
+
+Start the service:
+
+```sh
 go run ./cmd/api_datagram -config ./config.yaml
-# Environment values override YAML:
+```
+
+On success, the service emits structured JSON logs with its bound TCP address. The example binds to `127.0.0.1:8090`; the built-in default is `:8090`.
+
+Never commit private keys or production identity allowlists. Keep one server key per identity and reuse it across restarts.
+
+## Configuration
+
+`api_datagram` loads typed YAML configuration through Viper. Values are resolved in this order, from highest to lowest priority:
+
+1. `DGP_*` environment variables
+2. the YAML file selected by `-config`, or a discovered default file
+3. built-in defaults
+
+Without `-config`, the service searches for `./config.yaml` and `./config/config.yaml`. A missing discovered file is allowed; a missing explicitly selected file is an error. Unknown YAML fields and invalid values stop startup.
+
+The complete template is [`config.example.yaml`](config.example.yaml). Important environment overrides are:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DGP_ADDRESS` | `:8090` | TCP `host:port` listen address. |
+| `DGP_STATIC_KEY` | none | Required unless `static_key_file` is configured; exactly 64 hexadecimal characters. |
+| `DGP_STATIC_KEY_FILE` | none | File containing the 64-character hexadecimal server private key. |
+| `DGP_PEER_IDENTITIES` | none | Fail-closed allowlist in `<public-key>=<principal>,...` form. |
+| `DGP_HANDSHAKE_TIMEOUT` | `10s` | Maximum Noise handshake duration. |
+| `DGP_READ_TIMEOUT` | `0s` | Per-frame read deadline; zero disables it. |
+| `DGP_WRITE_TIMEOUT` | `10s` | Per-frame write deadline. |
+| `DGP_IDLE_TIMEOUT` | `2m` | Authenticated inbound-idle limit. |
+| `DGP_KEEPALIVE_INTERVAL` | `30s` | Encrypted Ping interval. |
+| `DGP_KEEPALIVE_TIMEOUT` | `60s` | Maximum wait for the matching Pong. |
+| `DGP_OUTBOUND_QUEUE` | `64` | Per-connection outbound queue capacity. |
+| `DGP_HANDLER_QUEUE` | `64` | Per-connection pending handler capacity. |
+| `DGP_MAX_CONCURRENT_HANDSHAKES` | `64` | Concurrent handshake limit. |
+| `DGP_MAX_ACTIVE_CONNECTIONS` | `1024` | Authenticated connection limit. |
+
+Durations use Go syntax such as `500ms`, `15s`, and `2m`. The identity allowlist is required, timeouts and capacities are validated, and unknown peers are rejected.
+
+To override a non-secret setting for one run:
+
+```sh
 DGP_ADDRESS=127.0.0.1:9090 go run ./cmd/api_datagram -config ./config.yaml
 ```
 
-On success, the server logs its bound TCP address. The default is all interfaces on port `8090`; set `DGP_ADDRESS=127.0.0.1:8090` to listen only on the local machine.
+## Development commands
 
-## Continuous integration
+Run these commands from the repository root:
 
-GitHub Actions runs formatting, module tidiness/verification, vet, builds every command, unit/integration tests, the Linux race detector, coverage, golangci-lint, govulncheck, CycloneDX SBOM generation, and repository-history secret scanning for pushes and pull requests to `main`. The workflow has read-only repository permissions and does not pass secrets to pull-request code.
+```sh
+make build                    # build bin/api_datagram
+make test                     # run all server-module tests
+make coverage                 # enforce 85% coverage for internal/ and pkg/
+go test -race ./...           # run server-module tests with the race detector
+go test github.com/datagram-messenger/protocol
+go test -race github.com/datagram-messenger/protocol
+go vet ./...
+golangci-lint run             # uses .golangci.yml
+```
 
-Generate the application dependency inventory locally with `make sbom`; the pinned generator writes `sbom.cdx.json` by default. CI uploads that CycloneDX JSON artifact for 14 days. Review it together with `go.mod`, `go.sum`, the `govulncheck` result, and the [dependency review](docs/dependency-review.md) before a release. The SBOM is evidence for dependency review, not a vulnerability assessment by itself.
+The protocol dependency is a separate Go module and is not covered by `go test ./...`; run its tests explicitly when a change depends on protocol behavior.
 
-Coverage measures `./internal/...` and `./pkg/...` at an 85% minimum; command entrypoints are transparently excluded because they are wiring or placeholders. Run the same check on Ubuntu with GNU Make using `make coverage`; override settings with `COVERAGE_THRESHOLD` and `COVERAGE_PROFILE`. The generated `coverage.out` is uploaded for 14 days.
+Useful additional targets:
 
-Actions use stable major tags because verified commit SHAs are not maintained in this repository. Dependabot checks GitHub Actions monthly; review and merge those updates to keep pins current.
+```sh
+make benchmark BENCHTIME=2s COUNT=5
+make sbom
+make release VERSION=v1.2.3 DIST_DIR=dist
+make verify-release DIST_DIR=dist
+make clean
+```
 
-## Shutdown behavior
+Use `make help` for the complete target list. See the [benchmark methodology](benchmarks/METHODOLOGY.md) and [dependency review](docs/dependency-review.md) before interpreting generated artifacts.
 
-Send an interrupt (`Ctrl+C`) or `SIGTERM`. The server stops accepting connections, attempts to send each active peer an encrypted normal `SessionClose`, closes sockets, waits for connection goroutines, and exits. The configured write timeout bounds each graceful close attempt.
+## Repository structure
 
-## MVP boundary
+```text
+cmd/
+  api_datagram/     Runnable DGPv1 service
+  api_bot/          Placeholder bot-service entrypoint
+  auth/             Placeholder authentication-service entrypoint
+  user/             Placeholder user-service entrypoint
+docs/
+  dgpserver/        Application-facing server guide
+  protocol/         Normative DGPv1 specification
+internal/
+  buildinfo/        Build and release metadata
+  config/           Configuration loading and validation
+pkg/
+  dgpserver/        Routing, authentication, lifecycle, and test helpers
+benchmarks/         Benchmark methodology and published result assets
+.github/workflows/  CI and release automation
+```
 
-The current server supports TCP, Noise XX in exactly three flights, ChaCha20-Poly1305 data frames, rekeying, replay protection, encrypted Ping/Pong keepalives, and idle close.
+## Documentation
 
-The following are preserved as post-MVP design history only and are **not implemented, negotiated, or required**: QUIC transport, transport obfuscation, Noise IK, resumption tickets, and 0-RTT. AES-256-GCM exists as a library codec option but the launch entrypoint selects ChaCha20-Poly1305 and exposes no cipher negotiation setting.
+- [DGPv1 protocol specification](docs/protocol/dgp-v1.md)
+- [`dgpserver` developer guide](docs/dgpserver/README.md)
+- [`dgpserver` quickstart](docs/dgpserver/quickstart.md)
+- [Routing and middleware](docs/dgpserver/routing.md)
+- [Authentication and request context](docs/dgpserver/authentication-and-context.md)
+- [Lifecycle, errors, and operations](docs/dgpserver/lifecycle-and-errors.md)
+- [Testing handlers](docs/dgpserver/testing.md)
+- [Dependency review](docs/dependency-review.md)
+
+## Scope
+
+The current service supports TCP, three-flight Noise XX, ChaCha20-Poly1305 data frames, replay protection, directional rekeying, encrypted Ping/Pong keepalives, idle close, and graceful process shutdown. `api_datagram` exposes echo (`0x01`) and service-information (`0x02`) application commands as integration examples.
+
+QUIC, transport obfuscation, Noise IK, resumption tickets, and 0-RTT are not implemented or negotiated. AES-256-GCM exists as a protocol-library codec option, but the runnable service selects ChaCha20-Poly1305 and does not expose cipher negotiation.
+
+Send `SIGINT` or `SIGTERM` to stop the service. Shutdown stops accepting connections, closes active sessions, waits for server-owned work, and is bounded by configured deadlines.
 
 ## Releases
 
-Pushing a strict semantic-version tag such as `v1.2.3` runs the release delivery workflow. After tests, vet, and a production-command build, it cross-compiles only the runnable `api_datagram` service for Linux amd64/arm64, Windows amd64, and macOS amd64/arm64 with CGO disabled. Each archive includes `LICENSE`, `README.md`, and `config.example.yaml`; `SHA256SUMS` covers every archive. A GitHub Release is created only for a tag. Manual workflow runs are build-only and retain artifacts for 14 days.
+A strict semantic-version tag such as `v1.2.3` triggers the release workflow. It tests and vets the project, builds `api_datagram` archives for the configured release targets, writes `SHA256SUMS`, and publishes a release for tag-triggered runs. Manual workflow runs create build artifacts without publishing a release.
 
-Reproduce the archive set locally on Ubuntu with GNU Make, Go, Git, tar, gzip, and sha256sum available:
+Release binaries expose injected build metadata:
 
 ```sh
-make release VERSION=v1.2.3 DIST_DIR=dist
-make verify-release DIST_DIR=dist
+./bin/api_datagram -version
 ```
 
-Set `SOURCE_DATE_EPOCH` to reproduce artifacts with an explicit Unix timestamp; otherwise the source commit timestamp is used.
+The release workflow produces artifacts only; no production deployment target is defined.
 
-Release binaries report injected version, commit, and UTC source-commit date with `api_datagram -version`. Placeholder commands are intentionally excluded. This workflow delivers release artifacts; it does not deploy to production because no target infrastructure is defined.
+## License
+
+See [`LICENSE`](LICENSE).
