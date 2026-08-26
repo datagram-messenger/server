@@ -345,12 +345,14 @@ previous keys MUST be rejected as authentication failures.
 
 ### 4.5 Replay Window Mechanics
 
-Each session maintains, per receive direction, a 64-bit sliding-window
-anti-replay structure (modeled on the mechanism specified for IPsec ESP
-and used in WireGuard):
+Each session maintains, per receive direction, a 2048-bit sliding-window
+anti-replay structure over 64-bit Sequence Numbers (modeled on the mechanism
+specified for IPsec ESP and used in WireGuard). This corrects the former
+"64-bit sliding-window" wording; it does not change the frame field or wire
+semantics:
 
-- `highest_seq` — the highest validated Sequence Number received.
-- `window_bitmap` — a fixed-size bitmap (RECOMMENDED: 2048 bits) tracking
+- `highest_seq` — the highest validated 64-bit Sequence Number received.
+- `window_bitmap` — a fixed 2048-bit bitmap tracking
   which of the most recent Sequence Numbers below `highest_seq` have
   already been accepted.
 

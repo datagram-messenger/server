@@ -12,9 +12,11 @@
 - stops the core server when `ctx` is canceled;
 - returns nil for the normal `dgpv1.ErrServerClosed` shutdown path and otherwise returns startup/listener errors.
 
-Coordinate shutdown explicitly instead of discarding the `Serve` result. `Shutdown(ctx)` starts graceful core closure and waits for serving, connections, handlers, and hooks. If its deadline expires, it aborts network I/O and returns an `*OpError` wrapping `ctx.Err()`. Application code that ignores cancellation may continue running; do not write unbounded handlers.
+Coordinate shutdown explicitly instead of discarding the `Serve` result. `Shutdown(ctx)` starts graceful core closure. Success is a completion barrier: core close, serving, connections, handlers, hooks, and server-owned goroutines have all completed. If its deadline expires, it aborts network I/O and returns an `*OpError` wrapping `ctx.Err()`; it must not report success while owned work remains. The caller owns the shutdown deadline and must cancel any context it derives.
 
-`Close` triggers immediate server closure without a caller-provided deadline. It is safe before serving and repeat calls are tolerated. A server cannot be restarted.
+Application handlers and hooks must honor cancellation and return promptly. Handlers remain server-owned until they return. `OnDisconnect` is different: its invocation is bounded by `DisconnectTimeout`; after that deadline the server detaches its wait so non-cooperative user code cannot retain protocol connection accounting or block shutdown. The hook goroutine may therefore unavoidably outlive the connection and server, and Go cannot forcibly stop it. Panics remain recovered at the callback boundary.
+
+`Close` triggers immediate server closure without a caller-provided deadline. It is safe before serving and repeat calls are tolerated. The first terminal cause remains stable across concurrent or repeated close paths. A server cannot be restarted; reconnecting clients establish a fresh connection lifecycle with new contexts, queues, replay/key state, and completion accounting.
 
 ## Hooks
 
@@ -44,8 +46,9 @@ There is no automatic wire error response. If policy permits one, send a sanitiz
 
 - Persist and protect the server Noise static private key. Rotation changes server identity and must be coordinated with clients.
 - Bind explicitly. `:8090` exposes all interfaces; use a loopback or private address when public exposure is not intended.
-- Configure positive handshake/write/idle/keepalive timeouts and ensure `ReadTimeout`, when enabled, is at least the liveness window accepted by `dgpv1.NewServer`.
-- Keep `OutboundQueue`, `HandlerQueue`, `MaxConcurrentHandshakes`, and `MaxActiveConnections` bounded. Handler-queue overflow is terminal rather than silently dropping messages.
+- Configure positive handshake/write/idle/keepalive timeouts and ensure `ReadTimeout`, when enabled, is at least the liveness window accepted by `dgpv1.NewServer`. Keepalive Ping/Pong and required close/rekey controls must use bounded reserved capacity or a dedicated control path, never wait behind a full application queue; inability to send required control traffic is terminal.
+- Keep `OutboundQueue`, `HandlerQueue`, `MaxConcurrentHandshakes`, and `MaxActiveConnections` bounded. Queue admission must block cancelably or fail explicitly. Handler-queue overflow is terminal rather than silently dropping messages; no overload path may create untracked per-message goroutines.
+- Enforce frame, payload, padding, handshake, decoder, and per-connection resource limits before allocation or application dispatch. Reject malformed, truncated, oversized, unauthenticated, or state-invalid input deterministically without retaining partial state or attacker-controlled resources.
 - A slow handler blocks later application messages on the same connection. Move expensive work to a bounded application worker system only when ownership, cancellation, overload, and response correlation are explicit.
 - Different connections run concurrently. Protect shared state and make middleware dependencies concurrency-safe.
 - Avoid logging payloads, static keys, principals, session IDs, message text, or error causes unless a reviewed data policy permits it. Prefer coarse event types and safe correlation values.
