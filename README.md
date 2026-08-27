@@ -1,10 +1,42 @@
+<div align="center">
+
 # Datagram Server
 
-[![Go CI](https://github.com/tr1xdev/datagram-server/actions/workflows/ci.yml/badge.svg)](https://github.com/tr1xdev/datagram-server/actions/workflows/ci.yml)
+**The backend that powers the Datagram messenger.**
 
-Datagram Server is the Go backend and server toolkit for DGProto v1, Datagram's encrypted messaging protocol. The runnable `api_datagram` service provides authenticated TCP sessions using a three-flight `Noise_XX_25519_ChaChaPoly_SHA256` handshake, replay protection, directional rekeying, encrypted keepalives, idle-connection handling, and graceful shutdown.
+A production-oriented Go backend for secure, real-time messaging over DGProto v1.
 
+[![CI](https://github.com/datagram-messenger/server/actions/workflows/ci.yml/badge.svg)](https://github.com/datagram-messenger/server/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![DGProto v1](https://img.shields.io/badge/protocol-DGProto%20v1-6f42c1)](docs/protocol/dgproto-v1.md)
+
+[Getting started](#quick-start) · [Configuration](#configuration) · [Documentation](#documentation) · [Contributing](CONTRIBUTING.md)
+
+</div>
+
+---
+
+## About
+
+**Datagram Server is, first and foremost, the backend of the Datagram messenger.** This repository contains the Go services and server-side foundations responsible for accepting authenticated client connections, routing application messages, enforcing connection limits, and managing the lifecycle of secure sessions.
+
+It also provides the reusable `dgpserver` package used by those services and integrates the standalone [`dgproto-go`](https://github.com/datagram-messenger/dgproto-go) implementation of Datagram's encrypted DGProto v1 wire protocol.
+
+The runnable `api_datagram` service currently provides:
+
+- authenticated TCP sessions with a three-flight `Noise_XX_25519_ChaChaPoly_SHA256` handshake;
+- ChaCha20-Poly1305 encrypted frames, replay protection, and directional rekeying;
+- encrypted Ping/Pong keepalives and idle-connection handling;
+- bounded connection, handshake, queue, and handler concurrency;
+- structured JSON logging and graceful, deadline-bounded shutdown.
+
+> [!IMPORTANT]
 > DGProto v1 is security-sensitive infrastructure. The [protocol specification](docs/protocol/dgproto-v1.md) is the source of truth for wire behavior.
+
+## Project status
+
+Datagram is under active development. The secure transport and server lifecycle are implemented; broader messenger services and product functionality are evolving. The echo and service-information commands exposed by `api_datagram` are integration examples, not the complete Datagram application API.
 
 ## Prerequisites
 
@@ -22,7 +54,7 @@ Release builds additionally require `tar`, `gzip`, `sha256sum`, and standard GNU
 Clone the repository and create a local configuration:
 
 ```sh
-git clone https://github.com/tr1xdev/datagram-server.git
+git clone https://github.com/datagram-messenger/server.git
 cd datagram-server
 cp config.example.yaml config.yaml
 ```
@@ -145,6 +177,7 @@ benchmarks/         Benchmark methodology and published result assets
 
 ## Documentation
 
+- [Contributing guide](CONTRIBUTING.md)
 - [DGProto v1 protocol specification](docs/protocol/dgproto-v1.md)
 - [`dgpserver` developer guide](docs/dgpserver/README.md)
 - [`dgpserver` quickstart](docs/dgpserver/quickstart.md)
