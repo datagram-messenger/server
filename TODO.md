@@ -861,6 +861,23 @@ No provable implementation/specification mismatch was found in the audited frami
 - `go test -race ./...`: not run successfully; exact toolchain error was `go: -race requires cgo; enable cgo by setting CGO_ENABLED=1` (`CGO_ENABLED=0`). On Windows, `where gcc` found no compiler, so the requested CGO-enabled retry was unavailable without installing a toolchain. Keep the race release gate open.
 - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run ./...` completed with zero issues, including `intrange` and revive `use-waitgroup-go`.
 
+## Standalone `dgproto-go` security and stability hardening (2026-08-27)
+
+Audit target: standalone module `../dgproto-go`, base `854d4d1`, branch `audit/security-stability-20260827`, final `4621fc3`.
+
+- [x] Read `AGENTS.md`, this roadmap, the standalone specification, repository history, and baseline state before changing code.
+- [x] Create isolated audit branches without deleting or rewriting existing files.
+- [x] Audit parsing/allocation bounds, partial I/O, handshake and cryptographic state, replay/rekey transitions, queues, cancellation, shutdown/reconnect, callbacks, and goroutine/timer ownership.
+- [x] Fix mutable terminal-error state: the first non-nil connection terminal cause now remains stable for all waiters and hooks; regression `TestTerminalCauseRemainsFirstObservedCause`; commit `92562b6`.
+- [x] Remove the unused shutdown test helper reported by static analysis; commit `4621fc3`.
+- [x] Validation passed: `go test ./...`, `go vet ./...`, `go mod verify`, staticcheck, `git diff --check`, lifecycle/concurrency tests repeated 100 times, focused tests repeated 50 times, and all five fuzz targets for five seconds each.
+- [x] `govulncheck` found no known vulnerabilities called by module code. It reported one finding in imported packages and eight in required modules that are not reached by this code; retain dependency updates and vulnerability scanning in CI.
+- [ ] Run `go test -race ./...` in CI or on a host with a C compiler. Local execution remains blocked by `CGO_ENABLED=0`; the CGO retry cannot find `gcc`.
+- [ ] Treat application callbacks as cooperative: graceful `Close` is intentionally a completion barrier and can wait for a handler/hook that never returns; use bounded application callbacks and escalate with `Abort` when bounded shutdown is required.
+- [ ] Run longer fuzz, reconnect, slow-peer, queue-saturation, and shutdown stress campaigns under the race detector before a production release.
+
+No wire-format or public-API behavior changed. No additional concrete production defect was confirmed in the final lifecycle pass.
+
 ## Completed maintenance
 
 - [x] Re-validated the integer-loop modernization with the configured `intrange` analyzer; the full pinned golangci-lint run passed with zero issues.
