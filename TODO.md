@@ -300,7 +300,7 @@ Integration tests still use real loopback TCP plus a `dgproto` client for handsh
 
 ## MVP implementation phases
 
-Audit basis: `HEAD` `ac8fd30`, the current `pkg/dgpserver`, `pkg/dgproto`, and `cmd/api_datagram` code/tests, plus `docs/protocol/dgp-v1.md` and `docs/dgpserver/`. A checked aggregate item means every clause is implemented and covered; partial work stays open and is split below.
+Audit basis: `HEAD` `ac8fd30`, the current `pkg/dgpserver`, `pkg/dgproto`, and `cmd/api_datagram` code/tests, plus `docs/protocol/dgproto-v1.md` and `docs/dgpserver/`. A checked aggregate item means every clause is implemented and covered; partial work stays open and is split below.
 
 Static-analysis audit: the repository and CI use golangci-lint v2 configuration, with CI pinned to v2.11.4. That release does not expose linters named `waitgroupgo` or `rangeint`; their supported equivalents are the revive rule `use-waitgroup-go` and the `intrange` linter. Both are enabled in `.golangci.yml`. Validation with `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 config verify`, a focused `intrange,revive` run, and the full configured repository run completed successfully with zero issues. The final working-copy audit also passed `gofmt -l .` with no output, `go test ./...`, `go vet ./...`, the pinned full golangci-lint v2.11.4 run with zero issues, and `git diff --check`. The native `go test -race ./...` attempt was blocked because `CGO_ENABLED=0`; Windows reported `go: -race requires cgo; enable cgo by setting CGO_ENABLED=1`, and no `gcc` executable was available, so the CGO-enabled retry could not run without installing a toolchain. No CI pin update or benchmark-loop change was required.
 
@@ -837,7 +837,7 @@ Features intentionally deferred from the first slice:
 
 ## Go 1.25 and DGProto v1 audit (current tree)
 
-Audit basis: all 65 Go source/test files at `f71984f`, `docs/protocol/dgp-v1.md`, and `docs/dgpserver/`; implementation code was not changed by this audit.
+Audit basis: all 65 Go source/test files at `f71984f`, `docs/protocol/dgproto-v1.md`, and `docs/dgpserver/`; implementation code was not changed by this audit.
 
 ### Go 1.25 modernization
 
@@ -850,8 +850,8 @@ Audit basis: all 65 Go source/test files at `f71984f`, `docs/protocol/dgp-v1.md`
 
 No provable implementation/specification mismatch was found in the audited framing and wire encoding, handshake profile/session-ID derivation, directional keys/nonces, state transitions, reserved-header/AAD handling, replay window, rekey transition/grace rules, close semantics, message registry, or bounded runtime paths. Two specification gaps should still be closed before compatibility guarantees are declared; they are not recorded as implementation defects because the current normative text does not state the opposite behavior:
 
-- [ ] Specify the protocol-wide maximum frame size. The normative header carries a `uint32` payload length and defines frame-size arithmetic without an explicit maximum (`docs/protocol/dgp-v1.md:131-170`), while `pkg/dgproto/header.go:15-16` fixes `MaxFrameSize = 65535` and `pkg/dgproto/header.go:118-120` rejects larger frames. Document the intended limit and compatibility requirement before any implementation change.
-- [ ] Specify whether duplicate application TLV types are permitted. The generic TLV envelope scopes identifiers to the enclosing message but does not define duplicate handling (`docs/protocol/dgp-v1.md:83-103`); `EncryptedData` rejects duplicates on send and receive (`pkg/dgproto/messages.go:222-255`, `pkg/dgproto/messages.go:296-305`). Resolve the normative ambiguity before changing parser behavior or vectors.
+- [ ] Specify the protocol-wide maximum frame size. The normative header carries a `uint32` payload length and defines frame-size arithmetic without an explicit maximum (`docs/protocol/dgproto-v1.md:131-170`), while `pkg/dgproto/header.go:15-16` fixes `MaxFrameSize = 65535` and `pkg/dgproto/header.go:118-120` rejects larger frames. Document the intended limit and compatibility requirement before any implementation change.
+- [ ] Specify whether duplicate application TLV types are permitted. The generic TLV envelope scopes identifiers to the enclosing message but does not define duplicate handling (`docs/protocol/dgproto-v1.md:83-103`); `EncryptedData` rejects duplicates on send and receive (`pkg/dgproto/messages.go:222-255`, `pkg/dgproto/messages.go:296-305`). Resolve the normative ambiguity before changing parser behavior or vectors.
 
 ### Verification snapshot
 

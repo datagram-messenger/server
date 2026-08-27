@@ -4,7 +4,7 @@
 
 Datagram Server is the Go backend and server toolkit for DGProto v1, Datagram's encrypted messaging protocol. The runnable `api_datagram` service provides authenticated TCP sessions using a three-flight `Noise_XX_25519_ChaChaPoly_SHA256` handshake, replay protection, directional rekeying, encrypted keepalives, idle-connection handling, and graceful shutdown.
 
-> DGProto v1 is security-sensitive infrastructure. The [protocol specification](docs/protocol/dgp-v1.md) is the source of truth for wire behavior.
+> DGProto v1 is security-sensitive infrastructure. The [protocol specification](docs/protocol/dgproto-v1.md) is the source of truth for wire behavior.
 
 ## Prerequisites
 
@@ -145,7 +145,7 @@ benchmarks/         Benchmark methodology and published result assets
 
 ## Documentation
 
-- [DGProto v1 protocol specification](docs/protocol/dgp-v1.md)
+- [DGProto v1 protocol specification](docs/protocol/dgproto-v1.md)
 - [`dgpserver` developer guide](docs/dgpserver/README.md)
 - [`dgpserver` quickstart](docs/dgpserver/quickstart.md)
 - [Routing and middleware](docs/dgpserver/routing.md)

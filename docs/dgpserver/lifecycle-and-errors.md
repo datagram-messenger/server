@@ -50,7 +50,7 @@ There is no automatic wire error response. If policy permits one, send a sanitiz
 - Different connections run concurrently. Protect shared state and make middleware dependencies concurrency-safe.
 - Avoid logging payloads, static keys, principals, session IDs, message text, or error causes unless a reviewed data policy permits it. Prefer coarse event types and safe correlation values.
 - DGP transport security does not provide business authorization, idempotency, durable delivery, or peer processing confirmation.
-- Do not enable or document historical post-MVP protocol features. Consult the [DGProto v1 specification](../protocol/dgp-v1.md) and [pre-deployment checklist](../pre-deployment-checklist.md).
+- Do not enable or document historical post-MVP protocol features. Consult the [DGProto v1 specification](../protocol/dgproto-v1.md) and [pre-deployment checklist](../pre-deployment-checklist.md).
 
 ## Send behavior during termination
 

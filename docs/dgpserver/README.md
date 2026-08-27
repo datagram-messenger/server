@@ -2,7 +2,7 @@
 
 `pkg/dgpserver` is the application-facing server layer above [`github.com/datagram-messenger/dgproto-go`](https://github.com/datagram-messenger/dgproto-go). It owns typed application dispatch, command routing, middleware, admission, principals, lifecycle hooks, bounded sends, and test seams. `github.com/datagram-messenger/dgproto-go` owns TCP framing, Noise XX, encryption, replay protection, rekeying, keepalives, and connection I/O.
 
-Use this guide when building a service on DGProto v1. Read the [normative protocol specification](../protocol/dgp-v1.md) when implementing another peer or reasoning about wire compatibility.
+Use this guide when building a service on DGProto v1. Read the [normative protocol specification](../protocol/dgproto-v1.md) when implementing another peer or reasoning about wire compatibility.
 
 ## Start here
 

@@ -208,7 +208,7 @@ signature. Encrypted-frame AAD is exactly `header[0:40] || padding`. This change
 
 The MVP uses only `Noise_XX_25519_ChaChaPoly_SHA256`. It is a three-flight,
 1.5-RTT mutual-authentication handshake. Implementations MUST reject any
-other pattern in the MVP profile. Before processing the first Noise token, both peers MUST call `MixHash(prologue)` with the exact five ASCII octets `44 47 50 76 31` (`DGProto v1`), with no NUL terminator, length prefix, or newline.
+other pattern in the MVP profile. Before processing the first Noise token, both peers MUST call `MixHash(prologue)` with the exact five ASCII octets `44 47 50 76 31` (`DGPv1`), with no NUL terminator, length prefix, or newline.
 
 ### 4.2 Phase 1 — Client Hello / Ephemeral Key Exchange (Msg Type `0x01`)
 
@@ -251,7 +251,7 @@ HandshakeFinish Payload (client → server, Noise XX message 3):
 ```
 
 The client and server MUST NOT enter the encrypted-session state or use the
-Session ID until message 3 has been produced or authenticated, respectively. Let `channel_binding` be Noise's final 32-byte handshake hash returned by `ChannelBinding()` after message 3. Both peers MUST derive `SessionID = SHA-256(ASCII("DGProto v1 SessionID") || channel_binding)[0:16]`; concatenation has no separator or length prefix.
+Session ID until message 3 has been produced or authenticated, respectively. Let `channel_binding` be Noise's final 32-byte handshake hash returned by `ChannelBinding()` after message 3. Both peers MUST derive `SessionID = SHA-256(ASCII("DGPv1 SessionID") || channel_binding)[0:16]`; concatenation has no separator or length prefix.
 At that point both parties compute the full Diffie-Hellman transcript and
 derive the session key schedule via the Noise `Split()` convention. The two
 independent, directional 256-bit traffic keys are exactly the standard Noise
@@ -315,11 +315,11 @@ For current directional traffic secret `K` and proposed epoch `E`, the sender
 MUST compute:
 
 ```
-KeyConfirm = HMAC-SHA256(K, "DGProto v1 Rekey Confirm" || LE32(E))
-K_next     = HMAC-SHA256(K, "DGProto v1 Rekey Send Key")
+KeyConfirm = HMAC-SHA256(K, "DGPv1 Rekey Confirm" || LE32(E))
+K_next     = HMAC-SHA256(K, "DGPv1 Rekey Send Key")
 ```
 
-The label `"DGProto v1 Rekey Receive Key"` is reserved as the receive-labelled
+The label `"DGPv1 Rekey Receive Key"` is reserved as the receive-labelled
 output of the key-ratchet API. On the wire, both peers ratchet the same
 directional secret with the send label, so the sender's next send key equals
 the receiver's next receive key.
