@@ -171,6 +171,4 @@ jobs:
         with:
           fetch-depth: 0
       - name: Scan repository history
-        uses: gitleaks/gitleaks-action@v3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go run github.com/zricethezav/gitleaks/v8@v8.30.0 git --redact --exit-code 1 --log-opts="--all" .
