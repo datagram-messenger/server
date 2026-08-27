@@ -2,28 +2,30 @@
 
 # Datagram Server
 
-**The backend that powers the Datagram messenger.**
+**The Go backend for the Datagram messenger.**
 
-A production-oriented Go backend for secure, real-time messaging over DGProto v1.
+Secure, real-time messaging services built on DGProto v1.
 
 [![CI](https://github.com/datagram-messenger/server/actions/workflows/ci.yml/badge.svg)](https://github.com/datagram-messenger/server/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![DGProto v1](https://img.shields.io/badge/protocol-DGProto%20v1-6f42c1)](docs/protocol/dgproto-v1.md)
 
-[Getting started](#quick-start) · [Configuration](#configuration) · [Documentation](#documentation) · [Contributing](CONTRIBUTING.md)
+[Quick start](#quick-start) · [Configuration](#configuration) · [Development](#development-commands) · [Documentation](#documentation) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
 ---
 
-## About
+## Overview
 
-**Datagram Server is, first and foremost, the backend of the Datagram messenger.** This repository contains the Go services and server-side foundations responsible for accepting authenticated client connections, routing application messages, enforcing connection limits, and managing the lifecycle of secure sessions.
+Datagram Server is the Go backend for the **Datagram messenger**. It contains the services and server-side infrastructure responsible for authenticated client connections, application-message routing, resource limits, and secure session lifecycle management.
 
-It also provides the reusable `dgpserver` package used by those services and integrates the standalone [`dgproto-go`](https://github.com/datagram-messenger/dgproto-go) implementation of Datagram's encrypted DGProto v1 wire protocol.
+The repository currently also contains `dgpserver`, the server package shared by these services. Protocol primitives live in the standalone [`dgproto-go`](https://github.com/datagram-messenger/dgproto-go) module, which implements Datagram's encrypted DGProto v1 wire protocol.
 
-The runnable `api_datagram` service currently provides:
+### Highlights
+
+The runnable `api_datagram` service provides:
 
 - authenticated TCP sessions with a three-flight `Noise_XX_25519_ChaChaPoly_SHA256` handshake;
 - ChaCha20-Poly1305 encrypted frames, replay protection, and directional rekeying;
