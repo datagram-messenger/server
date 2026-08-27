@@ -21,7 +21,7 @@ Secure, real-time messaging services built on DGProto v1.
 
 Datagram Server is the Go backend for the **Datagram messenger**. It contains the services and server-side infrastructure responsible for authenticated client connections, application-message routing, resource limits, and secure session lifecycle management.
 
-The repository currently also contains `dgpserver`, the server package shared by these services. Protocol primitives live in the standalone [`dgproto-go`](https://github.com/datagram-messenger/dgproto-go) module, which implements Datagram's encrypted DGProto v1 wire protocol.
+The repository also contains the shared server package under `pkg/dgpserver`. Protocol primitives live in the standalone [`dgproto-go`](https://github.com/datagram-messenger/dgproto-go) module, which implements Datagram's encrypted DGProto v1 wire protocol.
 
 ### Highlights
 
@@ -57,7 +57,7 @@ Clone the repository and create a local configuration:
 
 ```sh
 git clone https://github.com/datagram-messenger/server.git
-cd datagram-server
+cd server
 cp config.example.yaml config.yaml
 ```
 
