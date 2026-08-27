@@ -1,5 +1,5 @@
-github.com/datagram-messenger/protocol v0.0.0-20260810200421-7ca556012ed4 h1:MP8OPCzwa1Qdxsh9vh0w5g7XwgjhqATdY3I11XaVrP8=
-github.com/datagram-messenger/protocol v0.0.0-20260810200421-7ca556012ed4/go.mod h1:VYzgXpEJbfKpbaLM+CahNCv5IRp2JKDW9C9rQVf1P2M=
+github.com/datagram-messenger/dgproto-go v0.0.0-20260827013034-79bf9cc5e208 h1:btari8VVzNkSvYtryxxKqgn9/7YEbQAAcwOJb8PPhjM=
+github.com/datagram-messenger/dgproto-go v0.0.0-20260827013034-79bf9cc5e208/go.mod h1:qm7ZzP4qT+rLGkn1CY1hPDYu666h0KVTwgg6FGtKvrM=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/flynn/noise v1.1.0 h1:KjPQoQCEFdZDiP03phOvGi11+SVVhBG2wOWAorLsstg=

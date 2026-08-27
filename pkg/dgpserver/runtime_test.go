@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 )
 
 func TestStaticKeyAllowlist(t *testing.T) {
@@ -51,7 +51,7 @@ func TestOpErrorWrapsShutdownCauseWithoutFormattingIt(t *testing.T) {
 }
 
 func TestServeInitializationFailureCompletesShutdown(t *testing.T) {
-	server, err := New(Config{DGP: dgpv1.ServerConfig{CipherSuite: dgpv1.CipherSuite(255)}})
+	server, err := New(Config{DGP: dgproto.ServerConfig{CipherSuite: dgproto.CipherSuite(255)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestDisconnectedConsumesStateExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn := new(dgpv1.Connection)
+	conn := new(dgproto.Connection)
 	server.states.Store(conn, connectionState{})
 	cause := errors.New("terminal")
 	start := make(chan struct{})
@@ -105,7 +105,7 @@ func TestDisconnectedConsumesStateExactlyOnce(t *testing.T) {
 		go func() {
 			defer callers.Done()
 			<-start
-			server.disconnected(context.Background(), conn, dgpv1.AdmissionInfo{}, cause)
+			server.disconnected(context.Background(), conn, dgproto.AdmissionInfo{}, cause)
 		}()
 	}
 	close(start)
@@ -116,7 +116,7 @@ func TestDisconnectedConsumesStateExactlyOnce(t *testing.T) {
 }
 
 func TestServeIsOneShotUnderConcurrentCalls(t *testing.T) {
-	server, err := New(Config{DGP: dgpv1.ServerConfig{StaticKey: fixedKey(t, 11)}})
+	server, err := New(Config{DGP: dgproto.ServerConfig{StaticKey: fixedKey(t, 11)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestServeIsOneShotUnderConcurrentCalls(t *testing.T) {
 }
 
 func TestServeRootCancellationStopsServerAndFreezesRouter(t *testing.T) {
-	server, err := New(Config{DGP: dgpv1.ServerConfig{StaticKey: fixedKey(t, 12)}})
+	server, err := New(Config{DGP: dgproto.ServerConfig{StaticKey: fixedKey(t, 12)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestServeRootCancellationStopsServerAndFreezesRouter(t *testing.T) {
 	if err := server.Router().Use(func(next Handler) Handler { return next }); !errors.Is(err, ErrServerStarted) {
 		t.Fatalf("middleware mutation after start returned %v", err)
 	}
-	if err := server.Router().HandleAck(func(*Context, *dgpv1.Ack) error { return nil }); !errors.Is(err, ErrServerStarted) {
+	if err := server.Router().HandleAck(func(*Context, *dgproto.Ack) error { return nil }); !errors.Is(err, ErrServerStarted) {
 		t.Fatalf("route mutation after start returned %v", err)
 	}
 
@@ -214,7 +214,7 @@ func TestServeRootCancellationStopsServerAndFreezesRouter(t *testing.T) {
 }
 
 func TestServeWithCanceledRootContextReturnsNil(t *testing.T) {
-	server, err := New(Config{DGP: dgpv1.ServerConfig{StaticKey: fixedKey(t, 13)}})
+	server, err := New(Config{DGP: dgproto.ServerConfig{StaticKey: fixedKey(t, 13)}})
 	if err != nil {
 		t.Fatal(err)
 	}

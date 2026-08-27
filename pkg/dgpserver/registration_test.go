@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 )
 
 func TestContractRegistrationHelpers(t *testing.T) {
@@ -17,42 +17,42 @@ func TestContractRegistrationHelpers(t *testing.T) {
 		{
 			name: "generic",
 			register: func(router *Router, called *bool) error {
-				return Handle(router, func(_ *Context, message *dgpv1.Ack) error {
+				return Handle(router, func(_ *Context, message *dgproto.Ack) error {
 					*called = len(message.Sequences) == 1 && message.Sequences[0] == 1
 					return nil
 				})
 			},
-			message: &dgpv1.Ack{Sequences: []uint64{1}},
+			message: &dgproto.Ack{Sequences: []uint64{1}},
 		},
 		{
 			name: "encrypted data method",
 			register: func(router *Router, called *bool) error {
-				return router.HandleEncryptedData(func(_ *Context, message *dgpv1.EncryptedData) error {
+				return router.HandleEncryptedData(func(_ *Context, message *dgproto.EncryptedData) error {
 					*called = message.StreamID == 2
 					return nil
 				})
 			},
-			message: &dgpv1.EncryptedData{StreamID: 2},
+			message: &dgproto.EncryptedData{StreamID: 2},
 		},
 		{
 			name: "ack method",
 			register: func(router *Router, called *bool) error {
-				return router.HandleAck(func(_ *Context, message *dgpv1.Ack) error {
+				return router.HandleAck(func(_ *Context, message *dgproto.Ack) error {
 					*called = len(message.Sequences) == 1 && message.Sequences[0] == 3
 					return nil
 				})
 			},
-			message: &dgpv1.Ack{Sequences: []uint64{3}},
+			message: &dgproto.Ack{Sequences: []uint64{3}},
 		},
 		{
 			name: "error method",
 			register: func(router *Router, called *bool) error {
-				return router.HandleError(func(_ *Context, message *dgpv1.ErrorMessage) error {
+				return router.HandleError(func(_ *Context, message *dgproto.ErrorMessage) error {
 					*called = message.Code == 4
 					return nil
 				})
 			},
-			message: &dgpv1.ErrorMessage{Code: 4},
+			message: &dgproto.ErrorMessage{Code: 4},
 		},
 	}
 
@@ -75,7 +75,7 @@ func TestContractRegistrationHelpers(t *testing.T) {
 
 func TestContractRegistrationHelpersRejectNilAndDuplicates(t *testing.T) {
 	var nilRouter *Router
-	if err := nilRouter.HandleAck(func(*Context, *dgpv1.Ack) error { return nil }); !errors.Is(err, ErrNilHandler) {
+	if err := nilRouter.HandleAck(func(*Context, *dgproto.Ack) error { return nil }); !errors.Is(err, ErrNilHandler) {
 		t.Fatalf("nil router: %v", err)
 	}
 
@@ -83,10 +83,10 @@ func TestContractRegistrationHelpersRejectNilAndDuplicates(t *testing.T) {
 	if err := router.HandleAck(nil); !errors.Is(err, ErrNilHandler) {
 		t.Fatalf("nil handler: %v", err)
 	}
-	if err := router.HandleAck(func(*Context, *dgpv1.Ack) error { return nil }); err != nil {
+	if err := router.HandleAck(func(*Context, *dgproto.Ack) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := Handle(&router, func(*Context, *dgpv1.Ack) error { return nil }); !errors.Is(err, ErrDuplicateHandler) {
+	if err := Handle(&router, func(*Context, *dgproto.Ack) error { return nil }); !errors.Is(err, ErrDuplicateHandler) {
 		t.Fatalf("duplicate across APIs: %v", err)
 	}
 }

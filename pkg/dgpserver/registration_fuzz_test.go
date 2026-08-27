@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 )
 
 var fuzzHandler = HandlerFunc(func(*Context, any) error { return nil })
@@ -27,7 +27,7 @@ func FuzzConfigValidationBoundaries(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, disconnectIndex, handshakeIndex, readIndex, queueIndex, handlerQueueIndex, handshakeLimitIndex, connectionLimitIndex uint8) {
 		disconnect := durations[int(disconnectIndex)%len(durations)]
-		dgp := dgpv1.ServerConfig{
+		dgp := dgproto.ServerConfig{
 			HandshakeTimeout:        durations[int(handshakeIndex)%len(durations)],
 			ReadTimeout:             durations[int(readIndex)%len(durations)],
 			OutboundQueue:           counts[int(queueIndex)%len(counts)],
@@ -68,11 +68,11 @@ func FuzzRouterRegistrationState(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, routeByte, formByte, duplicateByte, freezeByte uint8) {
-		messageTypes := [...]dgpv1.MessageType{
-			dgpv1.MessageTypeEncryptedData,
-			dgpv1.MessageTypeAck,
-			dgpv1.MessageTypeError,
-			dgpv1.MessageTypePingPong,
+		messageTypes := [...]dgproto.MessageType{
+			dgproto.MessageTypeEncryptedData,
+			dgproto.MessageTypeAck,
+			dgproto.MessageTypeError,
+			dgproto.MessageTypePingPong,
 		}
 		messageType := messageTypes[int(routeByte)%len(messageTypes)]
 		form := formByte % 3 // valid, nil interface, typed nil
@@ -98,7 +98,7 @@ func FuzzRouterRegistrationState(f *testing.F) {
 
 		wantFirst := error(nil)
 		switch {
-		case messageType == dgpv1.MessageTypePingPong:
+		case messageType == dgproto.MessageTypePingPong:
 			wantFirst = ErrUnsupportedMessage
 		case form != 0:
 			wantFirst = ErrNilHandler
@@ -109,7 +109,7 @@ func FuzzRouterRegistrationState(f *testing.F) {
 		if duplicateByte%2 == 1 {
 			wantSecond := error(nil)
 			switch {
-			case messageType == dgpv1.MessageTypePingPong:
+			case messageType == dgproto.MessageTypePingPong:
 				wantSecond = ErrUnsupportedMessage
 			case freezeByte%2 == 1:
 				wantSecond = ErrServerStarted
@@ -127,12 +127,12 @@ func FuzzCommandRouterRegistrationState(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, commandByte, formByte, groupByte, duplicateByte, freezeByte uint8) {
-		decoder := CommandDecoderFunc(func(message *dgpv1.EncryptedData) (Command, any, error) {
+		decoder := CommandDecoderFunc(func(message *dgproto.EncryptedData) (Command, any, error) {
 			return Command(message.AppMessageType), message, nil
 		})
 		router := NewCommandRouter(decoder)
 		if freezeByte%2 == 1 {
-			if err := router.dispatch(nil, &dgpv1.EncryptedData{AppMessageType: commandByte}); !errors.Is(err, ErrNotHandled) {
+			if err := router.dispatch(nil, &dgproto.EncryptedData{AppMessageType: commandByte}); !errors.Is(err, ErrNotHandled) {
 				t.Fatalf("freeze dispatch = %v", err)
 			}
 		}

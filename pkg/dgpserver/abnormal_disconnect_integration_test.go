@@ -7,26 +7,26 @@ import (
 	"testing"
 	"time"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 )
 
 func TestServerRealTCPAbnormalDisconnectCauseExactlyOnce(t *testing.T) {
 	handlerFailure := errors.New("handler failure")
 	tests := []struct {
 		name      string
-		handler   TypedHandlerFunc[dgpv1.EncryptedData]
+		handler   TypedHandlerFunc[dgproto.EncryptedData]
 		wantCause error
 	}{
 		{
 			name: "handler error",
-			handler: func(*Context, *dgpv1.EncryptedData) error {
+			handler: func(*Context, *dgproto.EncryptedData) error {
 				return handlerFailure
 			},
 			wantCause: handlerFailure,
 		},
 		{
 			name: "handler panic",
-			handler: func(*Context, *dgpv1.EncryptedData) error {
+			handler: func(*Context, *dgproto.EncryptedData) error {
 				panic("handler panic")
 			},
 			wantCause: ErrHandlerPanic,
@@ -38,7 +38,7 @@ func TestServerRealTCPAbnormalDisconnectCauseExactlyOnce(t *testing.T) {
 			serverKey, clientKey := fixedKey(t, 11), fixedKey(t, 12)
 			causes := make(chan error, 2)
 			srv, err := New(Config{
-				DGP: dgpv1.ServerConfig{
+				DGP: dgproto.ServerConfig{
 					StaticKey:        serverKey,
 					HandshakeTimeout: runtimeTimeout,
 					WriteTimeout:     runtimeTimeout,
@@ -50,7 +50,7 @@ func TestServerRealTCPAbnormalDisconnectCauseExactlyOnce(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := RegisterTyped[dgpv1.EncryptedData](srv.Router(), test.handler); err != nil {
+			if err := RegisterTyped[dgproto.EncryptedData](srv.Router(), test.handler); err != nil {
 				t.Fatal(err)
 			}
 
@@ -62,7 +62,7 @@ func TestServerRealTCPAbnormalDisconnectCauseExactlyOnce(t *testing.T) {
 			go func() { serveDone <- srv.Serve(context.Background(), listener) }()
 
 			transport, session := connectRuntimeClient(t, listener.Addr().String(), clientKey, serverKey)
-			sendClientMessage(t, transport, session, dgpv1.EncryptedData{})
+			sendClientMessage(t, transport, session, dgproto.EncryptedData{})
 			assertDisconnectCauseExactlyOnce(t, causes, test.wantCause)
 			_ = transport.Close()
 			stopRuntimeServer(t, srv, serveDone)
@@ -74,7 +74,7 @@ func TestServerRealTCPReplayRejectionDisconnectCauseExactlyOnce(t *testing.T) {
 	serverKey, clientKey := fixedKey(t, 13), fixedKey(t, 14)
 	causes := make(chan error, 2)
 	srv, err := New(Config{
-		DGP: dgpv1.ServerConfig{
+		DGP: dgproto.ServerConfig{
 			StaticKey:        serverKey,
 			HandshakeTimeout: runtimeTimeout,
 			WriteTimeout:     runtimeTimeout,
@@ -86,7 +86,7 @@ func TestServerRealTCPReplayRejectionDisconnectCauseExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := RegisterTyped[dgpv1.EncryptedData](srv.Router(), func(*Context, *dgpv1.EncryptedData) error {
+	if err := RegisterTyped[dgproto.EncryptedData](srv.Router(), func(*Context, *dgproto.EncryptedData) error {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestServerRealTCPReplayRejectionDisconnectCauseExactlyOnce(t *testing.T) {
 	go func() { serveDone <- srv.Serve(context.Background(), listener) }()
 
 	transport, session := connectRuntimeClient(t, listener.Addr().String(), clientKey, serverKey)
-	frame, err := session.Send(dgpv1.EncryptedData{}, 0)
+	frame, err := session.Send(dgproto.EncryptedData{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestServerRealTCPReplayRejectionDisconnectCauseExactlyOnce(t *testing.T) {
 	}
 	cancel()
 
-	assertDisconnectCauseExactlyOnce(t, causes, dgpv1.ErrReplayDuplicate)
+	assertDisconnectCauseExactlyOnce(t, causes, dgproto.ErrReplayDuplicate)
 	_ = transport.Close()
 	stopRuntimeServer(t, srv, serveDone)
 }

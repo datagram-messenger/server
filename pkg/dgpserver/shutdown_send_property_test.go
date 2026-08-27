@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 )
 
 func TestContextSendCancellationAndDisconnectProperties(t *testing.T) {
@@ -14,8 +14,8 @@ func TestContextSendCancellationAndDisconnectProperties(t *testing.T) {
 		name string
 		call func(*Context) error
 	}{
-		{name: "Send", call: func(ctx *Context) error { return ctx.Send(dgpv1.PingPong{}) }},
-		{name: "SendAndWait", call: func(ctx *Context) error { return ctx.SendAndWait(dgpv1.PingPong{}) }},
+		{name: "Send", call: func(ctx *Context) error { return ctx.Send(dgproto.PingPong{}) }},
+		{name: "SendAndWait", call: func(ctx *Context) error { return ctx.SendAndWait(dgproto.PingPong{}) }},
 	} {
 		t.Run(test.name+"/handler-cancellation", func(t *testing.T) {
 			parent, cancel := context.WithCancel(context.Background())
@@ -36,9 +36,9 @@ func TestContextSendCancellationAndDisconnectProperties(t *testing.T) {
 		name string
 		call func(*Context) error
 	}{
-		{name: "TrySend", call: func(ctx *Context) error { return ctx.TrySend(dgpv1.PingPong{}) }},
-		{name: "Send", call: func(ctx *Context) error { return ctx.Send(dgpv1.PingPong{}) }},
-		{name: "SendAndWait", call: func(ctx *Context) error { return ctx.SendAndWait(dgpv1.PingPong{}) }},
+		{name: "TrySend", call: func(ctx *Context) error { return ctx.TrySend(dgproto.PingPong{}) }},
+		{name: "Send", call: func(ctx *Context) error { return ctx.Send(dgproto.PingPong{}) }},
+		{name: "SendAndWait", call: func(ctx *Context) error { return ctx.SendAndWait(dgproto.PingPong{}) }},
 	} {
 		t.Run(test.name+"/disconnect-rejection", func(t *testing.T) {
 			ctx := NewContext(context.Background(), Peer{}, Metadata{}, Params{})

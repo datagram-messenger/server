@@ -1,8 +1,8 @@
 // Package dgpserver provides the high-level, application-facing server layer
-// for authenticated DGPv1 messages.
+// for authenticated DGProto v1 messages.
 //
 // The package deliberately exposes only EncryptedData, Ack, and ErrorMessage to
-// handlers. Inbound messages use pointer form, matching dgpv1.Session.Receive.
+// handlers. Inbound messages use pointer form, matching dgproto.Session.Receive.
 // A zero Router is ready for registration and freezes before serving or on its
 // first dispatch. CommandRouter provides codec-neutral routing within
 // EncryptedData, while Middleware composes application policy around handlers.

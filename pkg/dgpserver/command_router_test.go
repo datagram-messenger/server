@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 )
 
 func TestCommandRouterDispatchAndGroups(t *testing.T) {
-	decoder := CommandDecoderFunc(func(message *dgpv1.EncryptedData) (Command, any, error) {
+	decoder := CommandDecoderFunc(func(message *dgproto.EncryptedData) (Command, any, error) {
 		return Command(message.AppMessageType), message, nil
 	})
 	router := NewCommandRouter(decoder)
@@ -33,7 +33,7 @@ func TestCommandRouterDispatchAndGroups(t *testing.T) {
 			return err
 		}
 		return group.Handle(7, HandlerFunc(func(_ *Context, payload any) error {
-			message, ok := payload.(*dgpv1.EncryptedData)
+			message, ok := payload.(*dgproto.EncryptedData)
 			if !ok || message.StreamID != 9 {
 				t.Fatalf("payload = %#v", payload)
 			}
@@ -45,10 +45,10 @@ func TestCommandRouterDispatchAndGroups(t *testing.T) {
 	}
 
 	var dgp Router
-	if err := RegisterTyped[dgpv1.EncryptedData](&dgp, router.Handler()); err != nil {
+	if err := RegisterTyped[dgproto.EncryptedData](&dgp, router.Handler()); err != nil {
 		t.Fatal(err)
 	}
-	if err := dgp.Dispatch(NewContext(context.Background(), Peer{}, Metadata{}, Params{}), &dgpv1.EncryptedData{AppMessageType: 7, StreamID: 9}); err != nil {
+	if err := dgp.Dispatch(NewContext(context.Background(), Peer{}, Metadata{}, Params{}), &dgproto.EncryptedData{AppMessageType: 7, StreamID: 9}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := fmt.Sprint(order), fmt.Sprint([]string{"global before", "group before", "handler", "group after", "global after"}); got != want {
@@ -61,14 +61,14 @@ func TestCommandRouterDispatchAndGroups(t *testing.T) {
 
 func TestCommandRouterErrors(t *testing.T) {
 	decodeError := errors.New("decode")
-	router := NewCommandRouter(CommandDecoderFunc(func(*dgpv1.EncryptedData) (Command, any, error) {
+	router := NewCommandRouter(CommandDecoderFunc(func(*dgproto.EncryptedData) (Command, any, error) {
 		return 0, nil, decodeError
 	}))
-	if err := router.dispatch(nil, &dgpv1.EncryptedData{}); !errors.Is(err, decodeError) {
+	if err := router.dispatch(nil, &dgproto.EncryptedData{}); !errors.Is(err, decodeError) {
 		t.Fatalf("decoder error = %v", err)
 	}
 
-	router = NewCommandRouter(CommandDecoderFunc(func(message *dgpv1.EncryptedData) (Command, any, error) {
+	router = NewCommandRouter(CommandDecoderFunc(func(message *dgproto.EncryptedData) (Command, any, error) {
 		return Command(message.AppMessageType), message, nil
 	}))
 	handler := HandlerFunc(func(*Context, any) error { return nil })
@@ -78,7 +78,7 @@ func TestCommandRouterErrors(t *testing.T) {
 	if err := router.Handle(1, handler); !errors.Is(err, ErrDuplicateHandler) {
 		t.Fatalf("duplicate = %v", err)
 	}
-	if err := router.dispatch(nil, &dgpv1.EncryptedData{AppMessageType: 2}); !errors.Is(err, ErrNotHandled) {
+	if err := router.dispatch(nil, &dgproto.EncryptedData{AppMessageType: 2}); !errors.Is(err, ErrNotHandled) {
 		t.Fatalf("unknown command = %v", err)
 	}
 }
@@ -98,7 +98,7 @@ func TestCommandRouterRejectsNilConfiguration(t *testing.T) {
 	if err := router.Group(nil); !errors.Is(err, ErrNilHandler) {
 		t.Fatalf("nil group callback = %v", err)
 	}
-	if err := router.dispatch(nil, &dgpv1.EncryptedData{}); !errors.Is(err, ErrNilHandler) {
+	if err := router.dispatch(nil, &dgproto.EncryptedData{}); !errors.Is(err, ErrNilHandler) {
 		t.Fatalf("nil decoder = %v", err)
 	}
 }

@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 	"github.com/tr1xdev/datagram-server/internal/buildinfo"
 	"github.com/tr1xdev/datagram-server/internal/config"
 	"github.com/tr1xdev/datagram-server/pkg/dgpserver"
@@ -34,27 +34,27 @@ func TestCommandRouterRegistration(t *testing.T) {
 func TestCommandHandlers(t *testing.T) {
 	tests := []struct {
 		name    string
-		request *dgpv1.EncryptedData
-		want    *dgpv1.EncryptedData
+		request *dgproto.EncryptedData
+		want    *dgproto.EncryptedData
 	}{
 		{
 			name: "echo",
-			request: &dgpv1.EncryptedData{
+			request: &dgproto.EncryptedData{
 				StreamID: 42, AppMessageType: appMessageTypeEcho,
-				Fields: []dgpv1.TLV{{Type: 3, Value: []byte{1, 2, 3}}},
+				Fields: []dgproto.TLV{{Type: 3, Value: []byte{1, 2, 3}}},
 			},
-			want: &dgpv1.EncryptedData{
+			want: &dgproto.EncryptedData{
 				StreamID: 42, AppMessageType: appMessageTypeEcho,
-				Fields: []dgpv1.TLV{{Type: 3, Value: []byte{1, 2, 3}}},
+				Fields: []dgproto.TLV{{Type: 3, Value: []byte{1, 2, 3}}},
 			},
 		},
 		{
 			name:    "info",
-			request: &dgpv1.EncryptedData{StreamID: 84, AppMessageType: appMessageTypeInfo},
-			want: &dgpv1.EncryptedData{
+			request: &dgproto.EncryptedData{StreamID: 84, AppMessageType: appMessageTypeInfo},
+			want: &dgproto.EncryptedData{
 				StreamID: 84, AppMessageType: appMessageTypeInfo,
-				Fields: []dgpv1.TLV{
-					{Type: infoTLVProtocol, Value: []byte("dgpv1")},
+				Fields: []dgproto.TLV{
+					{Type: infoTLVProtocol, Value: []byte("dgproto")},
 					{Type: infoTLVService, Value: []byte("api_datagram")},
 				},
 			},
@@ -76,7 +76,7 @@ func TestCommandHandlers(t *testing.T) {
 			if len(items) != 1 {
 				t.Fatalf("sent %d messages, want 1", len(items))
 			}
-			got, ok := items[0].Message.(*dgpv1.EncryptedData)
+			got, ok := items[0].Message.(*dgproto.EncryptedData)
 			if !ok {
 				t.Fatalf("response type = %T", items[0].Message)
 			}
@@ -99,7 +99,7 @@ func TestCommandRouterUnknownCommand(t *testing.T) {
 	}
 	recorder := dgpserver.NewRecorder(1)
 	ctx := recorder.NewContext(context.Background(), dgpserver.Peer{}, dgpserver.Metadata{}, dgpserver.Params{})
-	err = router.Handler()(ctx, &dgpv1.EncryptedData{AppMessageType: 0xff})
+	err = router.Handler()(ctx, &dgproto.EncryptedData{AppMessageType: 0xff})
 	if !errors.Is(err, dgpserver.ErrNotHandled) {
 		t.Fatalf("dispatch error = %v, want %v", err, dgpserver.ErrNotHandled)
 	}
@@ -152,7 +152,7 @@ func TestServerLifecycleBeforeServe(t *testing.T) {
 	}
 }
 
-func assertEncryptedDataEqual(t *testing.T, got, want *dgpv1.EncryptedData) {
+func assertEncryptedDataEqual(t *testing.T, got, want *dgproto.EncryptedData) {
 	t.Helper()
 	if got.StreamID != want.StreamID || got.AppMessageType != want.AppMessageType || len(got.Fields) != len(want.Fields) {
 		t.Fatalf("response = %#v, want %#v", got, want)

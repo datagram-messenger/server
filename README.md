@@ -2,9 +2,9 @@
 
 [![Go CI](https://github.com/tr1xdev/datagram-server/actions/workflows/ci.yml/badge.svg)](https://github.com/tr1xdev/datagram-server/actions/workflows/ci.yml)
 
-Datagram Server is the Go backend and server toolkit for DGPv1, Datagram's encrypted messaging protocol. The runnable `api_datagram` service provides authenticated TCP sessions using a three-flight `Noise_XX_25519_ChaChaPoly_SHA256` handshake, replay protection, directional rekeying, encrypted keepalives, idle-connection handling, and graceful shutdown.
+Datagram Server is the Go backend and server toolkit for DGProto v1, Datagram's encrypted messaging protocol. The runnable `api_datagram` service provides authenticated TCP sessions using a three-flight `Noise_XX_25519_ChaChaPoly_SHA256` handshake, replay protection, directional rekeying, encrypted keepalives, idle-connection handling, and graceful shutdown.
 
-> DGPv1 is security-sensitive infrastructure. The [protocol specification](docs/protocol/dgp-v1.md) is the source of truth for wire behavior.
+> DGProto v1 is security-sensitive infrastructure. The [protocol specification](docs/protocol/dgp-v1.md) is the source of truth for wire behavior.
 
 ## Prerequisites
 
@@ -103,8 +103,8 @@ make build                    # build bin/api_datagram
 make test                     # run all server-module tests
 make coverage                 # enforce 85% coverage for internal/ and pkg/
 go test -race ./...           # run server-module tests with the race detector
-go test github.com/datagram-messenger/protocol
-go test -race github.com/datagram-messenger/protocol
+go test github.com/datagram-messenger/dgproto-go
+go test -race github.com/datagram-messenger/dgproto-go
 go vet ./...
 golangci-lint run             # uses .golangci.yml
 ```
@@ -127,13 +127,13 @@ Use `make help` for the complete target list. See the [benchmark methodology](be
 
 ```text
 cmd/
-  api_datagram/     Runnable DGPv1 service
+  api_datagram/     Runnable DGProto v1 service
   api_bot/          Placeholder bot-service entrypoint
   auth/             Placeholder authentication-service entrypoint
   user/             Placeholder user-service entrypoint
 docs/
   dgpserver/        Application-facing server guide
-  protocol/         Normative DGPv1 specification
+  protocol/         Normative DGProto v1 specification
 internal/
   buildinfo/        Build and release metadata
   config/           Configuration loading and validation
@@ -145,7 +145,7 @@ benchmarks/         Benchmark methodology and published result assets
 
 ## Documentation
 
-- [DGPv1 protocol specification](docs/protocol/dgp-v1.md)
+- [DGProto v1 protocol specification](docs/protocol/dgp-v1.md)
 - [`dgpserver` developer guide](docs/dgpserver/README.md)
 - [`dgpserver` quickstart](docs/dgpserver/quickstart.md)
 - [Routing and middleware](docs/dgpserver/routing.md)

@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 	"github.com/tr1xdev/datagram-server/internal/buildinfo"
 	"github.com/tr1xdev/datagram-server/internal/config"
 	"github.com/tr1xdev/datagram-server/pkg/dgpserver"
@@ -46,19 +46,19 @@ func main() {
 }
 
 func newCommandRouter() (*dgpserver.CommandRouter, error) {
-	commands := dgpserver.NewCommandRouter(dgpserver.CommandDecoderFunc(func(message *dgpv1.EncryptedData) (dgpserver.Command, any, error) {
+	commands := dgpserver.NewCommandRouter(dgpserver.CommandDecoderFunc(func(message *dgproto.EncryptedData) (dgpserver.Command, any, error) {
 		return dgpserver.Command(message.AppMessageType), message, nil
 	}))
 	for _, route := range []struct {
 		command dgpserver.Command
-		handler dgpserver.TypedHandlerFunc[dgpv1.EncryptedData]
+		handler dgpserver.TypedHandlerFunc[dgproto.EncryptedData]
 	}{
 		{dgpserver.Command(appMessageTypeEcho), handleEcho},
 		{dgpserver.Command(appMessageTypeInfo), handleInfo},
 	} {
 		handler := route.handler
 		err := commands.Handle(route.command, dgpserver.HandlerFunc(func(ctx *dgpserver.Context, payload any) error {
-			message, ok := payload.(*dgpv1.EncryptedData)
+			message, ok := payload.(*dgproto.EncryptedData)
 			if !ok {
 				return dgpserver.ErrInvalidMessageForm
 			}
@@ -71,24 +71,24 @@ func newCommandRouter() (*dgpserver.CommandRouter, error) {
 	return commands, nil
 }
 
-func handleEcho(ctx *dgpserver.Context, message *dgpv1.EncryptedData) error {
-	response := &dgpv1.EncryptedData{
+func handleEcho(ctx *dgpserver.Context, message *dgproto.EncryptedData) error {
+	response := &dgproto.EncryptedData{
 		StreamID:       message.StreamID,
 		AppMessageType: message.AppMessageType,
-		Fields:         make([]dgpv1.TLV, len(message.Fields)),
+		Fields:         make([]dgproto.TLV, len(message.Fields)),
 	}
 	for i, field := range message.Fields {
-		response.Fields[i] = dgpv1.TLV{Type: field.Type, Value: append([]byte(nil), field.Value...)}
+		response.Fields[i] = dgproto.TLV{Type: field.Type, Value: append([]byte(nil), field.Value...)}
 	}
 	return ctx.Send(response)
 }
 
-func handleInfo(ctx *dgpserver.Context, message *dgpv1.EncryptedData) error {
-	return ctx.Send(&dgpv1.EncryptedData{
+func handleInfo(ctx *dgpserver.Context, message *dgproto.EncryptedData) error {
+	return ctx.Send(&dgproto.EncryptedData{
 		StreamID:       message.StreamID,
 		AppMessageType: message.AppMessageType,
-		Fields: []dgpv1.TLV{
-			{Type: infoTLVProtocol, Value: []byte("dgpv1")},
+		Fields: []dgproto.TLV{
+			{Type: infoTLVProtocol, Value: []byte("dgproto")},
 			{Type: infoTLVService, Value: []byte("api_datagram")},
 		},
 	})
@@ -109,7 +109,7 @@ func newServer(cfg config.Config, logger *slog.Logger) (*dgpserver.Server, error
 	if cfg.HandshakeTimeout < 0 {
 		return nil, errors.New("api_datagram: handshake timeout must not be negative")
 	}
-	staticKey, err := dgpv1.LoadStaticKey(cfg.StaticKey[:])
+	staticKey, err := dgproto.LoadStaticKey(cfg.StaticKey[:])
 	if err != nil {
 		return nil, fmt.Errorf("load static key: %w", err)
 	}
@@ -119,9 +119,9 @@ func newServer(cfg config.Config, logger *slog.Logger) (*dgpserver.Server, error
 	}
 
 	server, err := dgpserver.New(dgpserver.Config{
-		DGP: dgpv1.ServerConfig{
+		DGP: dgproto.ServerConfig{
 			StaticKey:               staticKey,
-			CipherSuite:             dgpv1.CipherChaCha20Poly1305,
+			CipherSuite:             dgproto.CipherChaCha20Poly1305,
 			HandshakeTimeout:        cfg.HandshakeTimeout,
 			ReadTimeout:             cfg.ReadTimeout,
 			WriteTimeout:            cfg.WriteTimeout,
@@ -154,7 +154,7 @@ func newServer(cfg config.Config, logger *slog.Logger) (*dgpserver.Server, error
 	if err != nil {
 		return nil, fmt.Errorf("create server: %w", err)
 	}
-	if err := dgpserver.RegisterTyped[dgpv1.EncryptedData](server.Router(), commands.Handler()); err != nil {
+	if err := dgpserver.RegisterTyped[dgproto.EncryptedData](server.Router(), commands.Handler()); err != nil {
 		return nil, fmt.Errorf("register application routes: %w", err)
 	}
 	return server, nil
@@ -173,7 +173,7 @@ func run(ctx context.Context, logger *slog.Logger, configPath string) error {
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	logger.Info("DGPv1 server listening", "address", listener.Addr().String())
+	logger.Info("DGProto v1 server listening", "address", listener.Addr().String())
 
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(context.Background(), listener) }()

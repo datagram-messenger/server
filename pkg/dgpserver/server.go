@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 )
 
 // ConnectionInfo is an immutable snapshot supplied to lifecycle hooks.
@@ -55,24 +55,24 @@ type ErrorHandler func(*Context, error) error
 
 // Config configures a production high-level server.
 type Config struct {
-	DGP           dgpv1.ServerConfig
+	DGP           dgproto.ServerConfig
 	Router        *Router
 	Authenticator Authenticator
 	ErrorHandler  ErrorHandler
 	OnConnect     func(context.Context, ConnectionInfo) error
 	// OnDisconnect runs exactly once for every connection that reaches active
-	// registration. Its cause follows dgpv1 terminal-cause precedence.
+	// registration. Its cause follows dgproto terminal-cause precedence.
 	OnDisconnect      func(context.Context, ConnectionInfo, error)
 	DisconnectTimeout time.Duration
 }
 
-// Server owns one dgpv1 server runtime and its listener.
+// Server owns one dgproto server runtime and its listener.
 type Server struct {
 	config Config
 	router *Router
 
 	mu         sync.Mutex
-	core       *dgpv1.Server
+	core       *dgproto.Server
 	listener   net.Listener
 	started    bool
 	stopping   bool
@@ -87,7 +87,7 @@ type connectionState struct {
 	principal Principal
 }
 
-type connectionSender struct{ connection *dgpv1.Connection }
+type connectionSender struct{ connection *dgproto.Connection }
 
 func (s connectionSender) trySend(message any) error { return s.connection.TrySend(message) }
 func (s connectionSender) send(ctx context.Context, message any, wait bool) error {
@@ -143,7 +143,7 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	coreConfig.Admission = s.admit
 	coreConfig.OnDisconnect = s.disconnected
 	coreConfig.Handler = s.handle
-	core, err := dgpv1.NewServer(coreConfig)
+	core, err := dgproto.NewServer(coreConfig)
 	if err != nil {
 		_ = listener.Close()
 		s.finishServe(err)
@@ -165,7 +165,7 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	}()
 	err = core.Serve(listener)
 	s.finishServe(err)
-	if errors.Is(err, dgpv1.ErrServerClosed) || (s.wasStopping() && errors.Is(err, net.ErrClosed)) {
+	if errors.Is(err, dgproto.ErrServerClosed) || (s.wasStopping() && errors.Is(err, net.ErrClosed)) {
 		return nil
 	}
 	return err
@@ -244,7 +244,7 @@ func (s *Server) Close() error {
 	return nil
 }
 
-func (s *Server) admit(ctx context.Context, conn *dgpv1.Connection, info dgpv1.AdmissionInfo) (err error) {
+func (s *Server) admit(ctx context.Context, conn *dgproto.Connection, info dgproto.AdmissionInfo) (err error) {
 	address := ""
 	if info.RemoteAddr != nil {
 		address = info.RemoteAddr.String()
@@ -269,7 +269,7 @@ func (s *Server) admit(ctx context.Context, conn *dgpv1.Connection, info dgpv1.A
 	return nil
 }
 
-func (s *Server) handle(ctx context.Context, conn *dgpv1.Connection, message any) error {
+func (s *Server) handle(ctx context.Context, conn *dgproto.Connection, message any) error {
 	value, ok := s.states.Load(conn)
 	if !ok {
 		return ErrUnauthenticated
@@ -293,7 +293,7 @@ func (s *Server) handle(ctx context.Context, conn *dgpv1.Connection, message any
 	return &HandlerError{Kind: ErrorKindHandler, Err: err}
 }
 
-func (s *Server) disconnected(_ context.Context, conn *dgpv1.Connection, _ dgpv1.AdmissionInfo, cause error) {
+func (s *Server) disconnected(_ context.Context, conn *dgproto.Connection, _ dgproto.AdmissionInfo, cause error) {
 	value, ok := s.states.LoadAndDelete(conn)
 	if !ok || s.config.OnDisconnect == nil {
 		return

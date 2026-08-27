@@ -16,7 +16,7 @@ auth := dgpserver.NewStaticKeyAllowlist(map[[32]byte]dgpserver.Principal{
 
 For database or policy-backed admission, implement `Authenticator` or use `AuthenticatorFunc`. Honor context cancellation, return `ErrUnauthenticated` (or another sanitized local error) on rejection, and never log credentials or secret key material. Authenticator panics are recovered as rejection.
 
-A nil authenticator admits any peer that completes the cryptographic handshake and produces a nil principal. Set an authenticator explicitly for production trust boundaries. `dgpv1.ServerConfig.AllowedClients` is a lower-level static-key filter; prefer one clearly owned admission policy rather than inconsistent duplicate lists.
+A nil authenticator admits any peer that completes the cryptographic handshake and produces a nil principal. Set an authenticator explicitly for production trust boundaries. `dgproto.ServerConfig.AllowedClients` is a lower-level static-key filter; prefer one clearly owned admission policy rather than inconsistent duplicate lists.
 
 ## Principal and authorization
 
@@ -41,7 +41,7 @@ Do not retain the handler context for background work. If work must outlive a ha
 
 | Method | Backpressure | Success means |
 |---|---|---|
-| `TrySend(message)` | Never waits; can return `dgpv1.ErrOutboundQueueFull` | Accepted into the bounded outbound queue |
+| `TrySend(message)` | Never waits; can return `dgproto.ErrOutboundQueueFull` | Accepted into the bounded outbound queue |
 | `Send(message)` | Waits for queue capacity or handler-context cancellation | Enqueued, not written |
 | `SendAndWait(message)` | Waits for capacity and local transport completion | Written locally, not processed by the peer |
 | `Close()` | Uses the connection close path | Graceful close was initiated/completed as defined by the runtime |

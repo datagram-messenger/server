@@ -8,4 +8,4 @@ Regenerate from the repository root on Ubuntu with GNU Make:
 make benchmark BENCHTIME=1s COUNT=3
 ```
 
-The runners write the same raw artifacts. Summary files and `benchmarks/dgpv1-benchmark.svg` are derived from `latest.jsonl`; publish an SVG only after checking its labels, machine metadata, and medians. Never treat a machine snapshot as a universal protocol ranking.
+The runners write the same raw artifacts. Summary files and `benchmarks/dgproto-benchmark.svg` are derived from `latest.jsonl`; publish an SVG only after checking its labels, machine metadata, and medians. Never treat a machine snapshot as a universal protocol ranking.

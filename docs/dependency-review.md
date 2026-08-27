@@ -22,6 +22,6 @@ Before a release:
 
 The application SBOM contains 16 third-party Go modules. The dependency set is small and pinned by `go.mod`/`go.sum`. Most detected licenses are permissive BSD, MIT, or Apache-family licenses.
 
-One blocker remains: `github.com/datagram-messenger/protocol` currently has no license file in its repository, so automated license detection reports no evidence for that module. Add and review an explicit license in the protocol repository before a production release.
+One blocker remains: `github.com/datagram-messenger/dgproto-go` currently has no license file in its repository, so automated license detection reports no evidence for that module. Add and review an explicit license in the protocol repository before a production release.
 
 The first `dgpserver` release remains experimental until production race, leak, stress, abnormal-exit, and automatic-rekey gates are complete and the SDK has been exercised by a real service.

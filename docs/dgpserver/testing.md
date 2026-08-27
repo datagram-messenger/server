@@ -7,7 +7,7 @@ Most routing and business-policy tests do not need TCP, Noise, goroutines, or ti
 ```go
 func TestAck(t *testing.T) {
     var router dgpserver.Router
-    if err := router.HandleAck(func(ctx *dgpserver.Context, ack *dgpv1.Ack) error {
+    if err := router.HandleAck(func(ctx *dgpserver.Context, ack *dgproto.Ack) error {
         if ctx.Principal() != "alice" || ack.Sequences[0] != 7 {
             return errors.New("unexpected request")
         }
@@ -21,7 +21,7 @@ func TestAck(t *testing.T) {
         dgpserver.HandlerFunc(router.Dispatch),
         dgpserver.NewPeer("test", [16]byte{1}, []byte{2}),
         "alice",
-        &dgpv1.Ack{Sequences: []uint64{7}},
+        &dgproto.Ack{Sequences: []uint64{7}},
     )
     if err != nil {
         t.Fatal(err)
@@ -40,16 +40,16 @@ func TestReply(t *testing.T) {
     recorder := dgpserver.NewRecorder(2)
     ctx := recorder.NewContext(
         context.Background(), dgpserver.Peer{},
-        dgpserver.NewMetadata(dgpv1.MessageTypeEncryptedData, time.Now()),
+        dgpserver.NewMetadata(dgproto.MessageTypeEncryptedData, time.Now()),
         dgpserver.Params{},
     )
 
-    err := handler(ctx, &dgpv1.EncryptedData{StreamID: 9})
+    err := handler(ctx, &dgproto.EncryptedData{StreamID: 9})
     if err != nil {
         t.Fatal(err)
     }
     sent := recorder.Snapshot()
-    if len(sent) != 1 || sent[0].Message.(*dgpv1.Ack).Sequences[0] != 9 {
+    if len(sent) != 1 || sent[0].Message.(*dgproto.Ack).Sequences[0] != 9 {
         t.Fatalf("sent = %#v", sent)
     }
 }
@@ -61,7 +61,7 @@ Use a positive capacity. `NewRecorder(0)` panics by contract.
 
 ## What still needs integration tests
 
-Use real loopback TCP and a `dgpv1` client for:
+Use real loopback TCP and a `dgproto` client for:
 
 - Noise identities and authentication rejection;
 - session and wire interoperability;
@@ -119,12 +119,12 @@ go test ./pkg/dgpserver -run '^(TestCommandRouterDecoderFailureContract|TestComm
 go test ./pkg/dgpserver -run '^$' -fuzz '^FuzzCommandRouterDecoderPaths$' -fuzztime=2s
 ```
 
-The SDK remains codec-neutral: malformed application payloads are whatever the injected decoder rejects. Protocol-level `EncryptedData` parsing remains owned and tested by `github.com/datagram-messenger/protocol`; the command router neither reparses nor adds a server codec setting. Concurrent shutdown/send races remain a separate open release gate.
+The SDK remains codec-neutral: malformed application payloads are whatever the injected decoder rejects. Protocol-level `EncryptedData` parsing remains owned and tested by `github.com/datagram-messenger/dgproto-go`; the command router neither reparses nor adds a server codec setting. Concurrent shutdown/send races remain a separate open release gate.
 
 ## Shutdown/send concurrency properties
 
 The deterministic property matrix covers `TrySend`, context-aware queued `Send`, and `SendAndWait` against close with ordered and simultaneous starts. Explicit channels establish barriers; the only timeout is a bounded deadlock guard. It verifies terminal rejection, caller-context precedence before termination, completion waiter release, concurrent close idempotence, stable terminal cause, and that control close is not queued behind a full application queue. SDK tests also cover handler cancellation, disconnect-context send rejection, and concurrent server `Shutdown`/`Close` before `Serve`.
 
 ```sh
-go test ./pkg/dgpserver github.com/datagram-messenger/protocol -run 'Test(ContextSendCancellationAndDisconnectProperties|ConcurrentServerShutdownAndCloseBeforeServe|SendShutdownStateMachineProperties|FullQueueWaitersAndControlCloseProperties|ConcurrentCloseIsIdempotentAndTerminalCauseStable|SendCancellationPrecedenceBeforeTerminalState)$' -count=20
+go test ./pkg/dgpserver github.com/datagram-messenger/dgproto-go -run 'Test(ContextSendCancellationAndDisconnectProperties|ConcurrentServerShutdownAndCloseBeforeServe|SendShutdownStateMachineProperties|FullQueueWaitersAndControlCloseProperties|ConcurrentCloseIsIdempotentAndTerminalCauseStable|SendCancellationPrecedenceBeforeTerminalState)$' -count=20
 ```

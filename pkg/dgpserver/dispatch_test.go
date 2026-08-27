@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 )
 
 func TestDispatchHelper(t *testing.T) {
 	peer := NewPeer("remote", [16]byte{7}, []byte{1, 2})
 	principal := struct{ name string }{name: "alice"}
-	message := &dgpv1.Ack{Sequences: []uint64{9}}
+	message := &dgproto.Ack{Sequences: []uint64{9}}
 	var receivedAt time.Time
 	err := Dispatch(context.Background(), HandlerFunc(func(ctx *Context, got any) error {
 		if got != message {
@@ -21,11 +21,11 @@ func TestDispatchHelper(t *testing.T) {
 		if ctx.Principal() != principal {
 			t.Fatalf("principal = %#v", ctx.Principal())
 		}
-		if ctx.Peer().Address() != "remote" || ctx.Metadata().MessageType() != dgpv1.MessageTypeAck {
+		if ctx.Peer().Address() != "remote" || ctx.Metadata().MessageType() != dgproto.MessageTypeAck {
 			t.Fatal("context snapshots are incomplete")
 		}
 		receivedAt = ctx.Metadata().ReceivedAt()
-		if err := ctx.TrySend(&dgpv1.Ack{}); !errors.Is(err, ErrRecorderClosed) {
+		if err := ctx.TrySend(&dgproto.Ack{}); !errors.Is(err, ErrRecorderClosed) {
 			t.Fatalf("send capability = %v", err)
 		}
 		return nil
@@ -46,10 +46,10 @@ func TestDispatchHelperRejectsInvalidInputAndRecoversPanic(t *testing.T) {
 		message any
 		want    error
 	}{
-		{name: "nil handler", message: &dgpv1.Ack{}, want: ErrNilHandler},
-		{name: "value message", handler: handler, message: dgpv1.Ack{}, want: ErrInvalidMessageForm},
-		{name: "unsupported message", handler: handler, message: &dgpv1.PingPong{}, want: ErrUnsupportedMessage},
-		{name: "panic", handler: handler, message: &dgpv1.Ack{}, want: ErrHandlerPanic},
+		{name: "nil handler", message: &dgproto.Ack{}, want: ErrNilHandler},
+		{name: "value message", handler: handler, message: dgproto.Ack{}, want: ErrInvalidMessageForm},
+		{name: "unsupported message", handler: handler, message: &dgproto.PingPong{}, want: ErrUnsupportedMessage},
+		{name: "panic", handler: handler, message: &dgproto.Ack{}, want: ErrHandlerPanic},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

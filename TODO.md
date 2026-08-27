@@ -1,6 +1,6 @@
 # DGP High-Level Go Server SDK — implementation contract
 
-This document is the implementation-ready contract for `pkg/dgpserver`, an ergonomic server SDK over `pkg/dgpv1`. The protocol core remains responsible for framing, Noise, sessions, replay protection, rekeying, keepalive, and connection I/O. Existing `dgpv1` APIs and the DGP v1 wire format remain compatible.
+This document is the implementation-ready contract for `pkg/dgpserver`, an ergonomic server SDK over `pkg/dgproto`. The protocol core remains responsible for framing, Noise, sessions, replay protection, rekeying, keepalive, and connection I/O. Existing `dgproto` APIs and the DGP v1 wire format remain compatible.
 
 ## Design review of the existing roadmap
 
@@ -20,7 +20,7 @@ The contract below closes those gaps. The implemented owner decisions and API re
 
 ## Future application payload format (deferred; not normative MVP)
 
-- [ ] After a separate design/spec review, define Protobuf as the planned primary business/application payload format, with application data serialized from Protobuf messages. This is explicitly **not** a DGPv1 wire-format change: encoded Protobuf bytes belong inside the `EncryptedData` payload, while the current codec-neutral SDK and compatibility remain intact. The review must define schema ownership, versioning and evolution, unknown-field behavior, size/resource limits, security validation, and cross-language compatibility vectors before implementation. Protobuf is not part of the current normative MVP.
+- [ ] After a separate design/spec review, define Protobuf as the planned primary business/application payload format, with application data serialized from Protobuf messages. This is explicitly **not** a DGProto v1 wire-format change: encoded Protobuf bytes belong inside the `EncryptedData` payload, while the current codec-neutral SDK and compatibility remain intact. The review must define schema ownership, versioning and evolution, unknown-field behavior, size/resource limits, security validation, and cross-language compatibility vectors before implementation. Protobuf is not part of the current normative MVP.
 
 ## Frozen public API contract
 
@@ -35,7 +35,7 @@ type HandlerFunc func(*Context, any) error
 func (f HandlerFunc) Handle(c *Context, m any) error
 
 type ApplicationMessage interface {
-    dgpv1.EncryptedData | dgpv1.Ack | dgpv1.ErrorMessage
+    dgproto.EncryptedData | dgproto.Ack | dgproto.ErrorMessage
 }
 type TypedHandlerFunc[T ApplicationMessage] func(*Context, *T) error
 type Middleware func(Handler) Handler
@@ -45,12 +45,12 @@ func Handle[T ApplicationMessage](r *Router, h TypedHandlerFunc[T]) error
 func RegisterTyped[T ApplicationMessage](r *Router, h TypedHandlerFunc[T]) error
 
 func (r *Router) Use(...Middleware) error
-func (r *Router) HandleEncryptedData(TypedHandlerFunc[dgpv1.EncryptedData]) error
-func (r *Router) HandleAck(TypedHandlerFunc[dgpv1.Ack]) error
-func (r *Router) HandleError(TypedHandlerFunc[dgpv1.ErrorMessage]) error
+func (r *Router) HandleEncryptedData(TypedHandlerFunc[dgproto.EncryptedData]) error
+func (r *Router) HandleAck(TypedHandlerFunc[dgproto.Ack]) error
+func (r *Router) HandleError(TypedHandlerFunc[dgproto.ErrorMessage]) error
 ```
 
-`Router{}` is ready for registration. `Handle[T]` accepts only the closed inbound application-visible set `dgpv1.EncryptedData`, `dgpv1.Ack`, and `dgpv1.ErrorMessage`; pointer type arguments, unsupported types, nil handlers, and duplicates return configuration errors. Ping/pong, close, and rekey remain runtime-owned in MVP. The checked assertion lives in the adapter, never in application handlers.
+`Router{}` is ready for registration. `Handle[T]` accepts only the closed inbound application-visible set `dgproto.EncryptedData`, `dgproto.Ack`, and `dgproto.ErrorMessage`; pointer type arguments, unsupported types, nil handlers, and duplicates return configuration errors. Ping/pong, close, and rekey remain runtime-owned in MVP. The checked assertion lives in the adapter, never in application handlers.
 
 Registration is ordered, is not concurrency-safe, and is legal only before serving. Duplicate routes return `ErrDuplicateHandler`; there is no implicit replacement. The default unhandled route returns `ErrNotHandled`, which is observed but is nonfatal.
 
@@ -59,15 +59,15 @@ The module declares Go 1.25, so generic type declarations/functions are availabl
 ### Hello-world (15 lines)
 
 ```go
-func run(ctx context.Context, ln net.Listener, key dgpv1.StaticKey) error {
+func run(ctx context.Context, ln net.Listener, key dgproto.StaticKey) error {
     r := new(dgpserver.Router)
-    _ = r.HandleEncryptedData(func(c *dgpserver.Context, m *dgpv1.EncryptedData) error {
-        return c.TrySend(&dgpv1.EncryptedData{
+    _ = r.HandleEncryptedData(func(c *dgpserver.Context, m *dgproto.EncryptedData) error {
+        return c.TrySend(&dgproto.EncryptedData{
             StreamID: m.StreamID, AppMessageType: m.AppMessageType, Fields: m.Fields,
         })
     })
     s, err := dgpserver.New(dgpserver.Config{
-        DGP: dgpv1.ServerConfig{StaticKey: key}, Router: r,
+        DGP: dgproto.ServerConfig{StaticKey: key}, Router: r,
     })
     if err != nil {
         return err
@@ -83,7 +83,7 @@ Full examples must check registration errors; the compact example ignores only a
 
 ```go
 type Config struct {
-    DGP               dgpv1.ServerConfig
+    DGP               dgproto.ServerConfig
     Router            *Router
     Authenticator     Authenticator
     ErrorHandler      ErrorHandler
@@ -136,26 +136,26 @@ func (p Params) Get(string) (string, bool)
 func (p Params) All() map[string]string
 
 type Metadata struct { /* unexported */ }
-func NewMetadata(dgpv1.MessageType, time.Time) Metadata
-func (m Metadata) MessageType() dgpv1.MessageType
+func NewMetadata(dgproto.MessageType, time.Time) Metadata
+func (m Metadata) MessageType() dgproto.MessageType
 func (m Metadata) ReceivedAt() time.Time
 ```
 
-`Context` is one inbound invocation. Its Go context derives from the connection and is canceled on disconnect/shutdown. It is not a service locator: no `Set/Get`, global bag, raw `*dgpv1.Connection`, `Session`, frame, or traffic secrets. Dependencies are captured in typed closures.
+`Context` is one inbound invocation. Its Go context derives from the connection and is canceled on disconnect/shutdown. It is not a service locator: no `Set/Get`, global bag, raw `*dgproto.Connection`, `Session`, frame, or traffic secrets. Dependencies are captured in typed closures.
 
 Peer, principal, params, and metadata are immutable snapshots. Accessors clone slices; peer identity bytes are defensively copied. Inbound messages and nested slices are valid for the handler call and must be copied before retention/mutation. An outbound message must not be mutated while a send call is in progress.
 
 ### Backpressure: queued versus written
 
-- `TrySend` is nonblocking. Success means accepted into the bounded per-connection FIFO; full returns `dgpv1.ErrOutboundQueueFull`.
+- `TrySend` is nonblocking. Success means accepted into the bounded per-connection FIFO; full returns `dgproto.ErrOutboundQueueFull`.
 - `Send(m)` waits for bounded queue capacity using the embedded handler context. Success still means **queued**, not written; cancellation returns that context error.
 - `SendAndWait(m)` uses the embedded handler context and waits until the frame and any preceding automatic rekey are fully written. It does not mean peer receipt or business acknowledgement.
 - Concurrent sends are ordered by successful queue admission; no stronger ordering is promised.
-- Once connection termination wins, sends return `dgpv1.ErrConnectionClosed`; a receive-only or disconnect context has no send capability and returns `ErrRecorderClosed`.
+- Once connection termination wins, sends return `dgproto.ErrConnectionClosed`; a receive-only or disconnect context has no send capability and returns `ErrRecorderClosed`.
 - `Close` uses a dedicated control path and is not trapped behind a full application queue.
 - Inbound handler-queue overflow remains terminal; queues are never unbounded and messages are never silently dropped.
 
-Implement this with a compatible extension to `dgpv1.Connection` for context-aware enqueue and per-item write completion, not a second high-level queue. Preserve existing `Connection.Send` behavior.
+Implement this with a compatible extension to `dgproto.Connection` for context-aware enqueue and per-item write completion, not a second high-level queue. Preserve existing `Connection.Send` behavior.
 
 ### Codec-neutral command router and groups
 
@@ -163,9 +163,9 @@ Implement this with a compatible extension to `dgpv1.Connection` for context-awa
 type Command uint8
 
 type CommandDecoder interface {
-    DecodeCommand(*dgpv1.EncryptedData) (Command, any, error)
+    DecodeCommand(*dgproto.EncryptedData) (Command, any, error)
 }
-type CommandDecoderFunc func(*dgpv1.EncryptedData) (Command, any, error)
+type CommandDecoderFunc func(*dgproto.EncryptedData) (Command, any, error)
 
 // Command routes reuse Handler/HandlerFunc. The message argument is the
 // decoder result, so ordinary Middleware composes without another handler kind.
@@ -174,19 +174,19 @@ func (r *CommandRouter) Handle(Command, Handler) error
 func (r *CommandRouter) Group(func(*CommandGroup) error) error
 func (g *CommandGroup) Use(...Middleware) error
 func (g *CommandGroup) Handle(Command, Handler) error
-func (r *CommandRouter) Handler() TypedHandlerFunc[dgpv1.EncryptedData]
+func (r *CommandRouter) Handler() TypedHandlerFunc[dgproto.EncryptedData]
 ```
 
 The SDK selects no payload codec. A decoder may route directly on `AppMessageType`, inspect TLVs, or decode an application struct:
 
 ```go
 commands := dgpserver.NewCommandRouter(dgpserver.CommandDecoderFunc(
-    func(m *dgpv1.EncryptedData) (dgpserver.Command, any, error) {
+    func(m *dgproto.EncryptedData) (dgpserver.Command, any, error) {
         return dgpserver.Command(m.AppMessageType), m, nil
     }))
 _ = commands.Handle(1, dgpserver.HandlerFunc(
     func(c *dgpserver.Context, payload any) error {
-        return c.TrySend(payload.(*dgpv1.EncryptedData))
+        return c.TrySend(payload.(*dgproto.EncryptedData))
     }))
 _ = router.HandleEncryptedData(commands.Handler())
 ```
@@ -216,9 +216,9 @@ func (e *OpError) Error() string
 func (e *OpError) Unwrap() error
 ```
 
-Sentinels: `ErrServerStarted`, `ErrDuplicateHandler`, `ErrNilHandler`, `ErrUnsupportedMessage`, `ErrInvalidMessageForm`, `ErrNotHandled`, `ErrHandlerPanic`, `ErrRecorderFull`, `ErrRecorderClosed`, and `ErrUnauthenticated`; transport queue/connection errors remain in `dgpv1`. Sensitive identity is excluded from formatted error strings. All errors remain usable with `errors.Is/As`.
+Sentinels: `ErrServerStarted`, `ErrDuplicateHandler`, `ErrNilHandler`, `ErrUnsupportedMessage`, `ErrInvalidMessageForm`, `ErrNotHandled`, `ErrHandlerPanic`, `ErrRecorderFull`, `ErrRecorderClosed`, and `ErrUnauthenticated`; transport queue/connection errors remain in `dgproto`. Sensitive identity is excluded from formatted error strings. All errors remain usable with `errors.Is/As`.
 
-Returned handler/decoder errors reach the single configured `ErrorHandler` exactly once. Default policy: observe and continue for `ErrNotHandled`; sanitize and optionally send `dgpv1.ErrorMessage` for nonfatal `*HandlerError`; close one connection for fatal errors, invariant failures, and panics. Never send raw internal/authentication errors.
+Returned handler/decoder errors reach the single configured `ErrorHandler` exactly once. Default policy: observe and continue for `ErrNotHandled`; sanitize and optionally send `dgproto.ErrorMessage` for nonfatal `*HandlerError`; close one connection for fatal errors, invariant failures, and panics. Never send raw internal/authentication errors.
 
 An unremovable outer recovery boundary converts panic into an error wrapping `ErrHandlerPanic`; stack data is local-only. User recovery middleware may customize observation, not disable safety. `ErrorHandler` panic is itself recovered and closes the connection. Middleware may call `next` at most once; enforce this as a documented/tested contract without reflection.
 
@@ -291,16 +291,16 @@ func Dispatch(context.Context, Handler, Peer, Principal, any) error
 func TestEcho(t *testing.T) {
     rec := dgpserver.NewRecorder(1)
     c := rec.NewContext(context.Background(), dgpserver.Peer{}, dgpserver.Metadata{}, dgpserver.Params{})
-    err := echo(c, &dgpv1.EncryptedData{AppMessageType: 1})
+    err := echo(c, &dgproto.EncryptedData{AppMessageType: 1})
     if err != nil || len(rec.Snapshot()) != 1 { t.Fatal(err) }
 }
 ```
 
-Integration tests still use real loopback TCP plus a `dgpv1` client for handshake, authentication, rekey, deadlines, saturation, and shutdown.
+Integration tests still use real loopback TCP plus a `dgproto` client for handshake, authentication, rekey, deadlines, saturation, and shutdown.
 
 ## MVP implementation phases
 
-Audit basis: `HEAD` `ac8fd30`, the current `pkg/dgpserver`, `pkg/dgpv1`, and `cmd/api_datagram` code/tests, plus `docs/protocol/dgp-v1.md` and `docs/dgpserver/`. A checked aggregate item means every clause is implemented and covered; partial work stays open and is split below.
+Audit basis: `HEAD` `ac8fd30`, the current `pkg/dgpserver`, `pkg/dgproto`, and `cmd/api_datagram` code/tests, plus `docs/protocol/dgp-v1.md` and `docs/dgpserver/`. A checked aggregate item means every clause is implemented and covered; partial work stays open and is split below.
 
 Static-analysis audit: the repository and CI use golangci-lint v2 configuration, with CI pinned to v2.11.4. That release does not expose linters named `waitgroupgo` or `rangeint`; their supported equivalents are the revive rule `use-waitgroup-go` and the `intrange` linter. Both are enabled in `.golangci.yml`. Validation with `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 config verify`, a focused `intrange,revive` run, and the full configured repository run completed successfully with zero issues. The final working-copy audit also passed `gofmt -l .` with no output, `go test ./...`, `go vet ./...`, the pinned full golangci-lint v2.11.4 run with zero issues, and `git diff --check`. The native `go test -race ./...` attempt was blocked because `CGO_ENABLED=0`; Windows reported `go: -race requires cgo; enable cgo by setting CGO_ENABLED=1`, and no `gcc` executable was available, so the CGO-enabled retry could not run without installing a toolchain. No CI pin update or benchmark-loop change was required.
 
@@ -310,8 +310,8 @@ Static-analysis audit: the repository and CI use golangci-lint v2 configuration,
   - [x] Implementation has selected behavior for local write completion, context-driven serving, nil authentication, error observation, and disconnect timeout.
   - [x] Reconcile the frozen contract/examples with the implemented API (`Config.DGP`, embedded `Context`, send signatures, error names, and hook/auth types).
   - [x] Add the contract-level generic `Handle` function, typed router registration methods, and compiling router/command-router examples while preserving `RegisterTyped`.
-- [x] Add a narrow completed-handshake admission value/callback exposing peer public key, session ID, and address; preserve existing `dgpv1.Server` callers.
-- [x] Add context-aware queue admission and write completion internally/compatibly to `dgpv1.Connection`; keep `Connection.Send` unchanged.
+- [x] Add a narrow completed-handshake admission value/callback exposing peer public key, session ID, and address; preserve existing `dgproto.Server` callers.
+- [x] Add context-aware queue admission and write completion internally/compatibly to `dgproto.Connection`; keep `Connection.Send` unchanged.
 - [x] Define and test a precedence table for simultaneous transport, handler, local close, and shutdown terminal causes.
 
 **Acceptance:** low-level seams and compatibility are implemented and current tests pass, and the frozen public contract and compile-only examples now match the implemented API.
@@ -332,7 +332,7 @@ Static-analysis audit: the repository and CI use golangci-lint v2 configuration,
 
 ### Phase C — admission, hooks, and runtime lifecycle
 
-- [ ] Finish `New`, `Serve`, `Shutdown`, `Close`, authentication, principal propagation, error policy, and exact hooks over `dgpv1`.
+- [ ] Finish `New`, `Serve`, `Shutdown`, `Close`, authentication, principal propagation, error policy, and exact hooks over `dgproto`.
   - [x] Runtime construction, one-shot serving, route freeze, context-triggered stop, shutdown escalation, immediate close, completed-handshake authentication, principal propagation, error observation, and hooks are implemented.
   - [x] A static-key allowlist adapter exists.
   - [x] Ensure connect rejection/panic triggers exactly one disconnect hook after active state registration.
@@ -355,16 +355,16 @@ Static-analysis audit: the repository and CI use golangci-lint v2 configuration,
   - [x] Add standalone compiled typed-router and SDK command-router examples.
   - [x] Add standalone compiled allowlist-authentication, command-group, middleware, and graceful-shutdown examples; `cmd/api_datagram` remains the compiled migration example.
 - [ ] Add real-TCP tests, race/stress/leak tests, fuzz registration/config boundaries, and benchmarks for dispatch overhead.
-  - [x] SDK real-TCP integration covers authentication, hooks, typed dispatch/response, rejection/panic isolation, and shutdown escalation; `pkg/dgpv1` has parser fuzz targets.
+  - [x] SDK real-TCP integration covers authentication, hooks, typed dispatch/response, rejection/panic isolation, and shutdown escalation; `pkg/dgproto` has parser fuzz targets.
   - [x] Add deterministic dispatch-overhead benchmarks for a direct handler, the `Dispatch` helper, frozen typed routing, middleware, and command routing; record a reproducible machine-specific baseline.
   - [x] Add deterministic SDK registration/config fuzzing for bounded Config/New, typed Router, and CommandRouter registration states.
   - [ ] Add automatic-rekey and all-abnormal-exit SDK flows plus race/stress/leak suites.
 
-**Acceptance:** direct `dgpv1` users remain source-compatible, `cmd/api_datagram` has migrated, and developer documentation/examples exist; broader release evidence is incomplete.
+**Acceptance:** direct `dgproto` users remain source-compatible, `cmd/api_datagram` has migrated, and developer documentation/examples exist; broader release evidence is incomplete.
 
 ### MVP messenger development boundary
 
-The current code is sufficient to begin MVP messenger application development: DGPv1 framing/Noise/session behavior is implemented; the high-level server authenticates and exposes a principal; typed DGP messages support bounded sends; graceful shutdown exists; and real-TCP integration plus the migrated service exercise the main path.
+The current code is sufficient to begin MVP messenger application development: DGProto v1 framing/Noise/session behavior is implemented; the high-level server authenticates and exposes a principal; typed DGP messages support bounded sends; graceful shutdown exists; and real-TCP integration plus the migrated service exercise the main path.
 
 This is not production-release readiness. Before production, finish automatic-rekey/abnormal-exit coverage plus race/leak/stress/fuzz/release evidence. The race gate remains open because the required run was not possible with the earlier CGO/toolchain.
 
@@ -387,12 +387,12 @@ Do **not** include in the first release:
 
 ## Security and reliability release gates
 
-- [ ] Preserve wire compatibility and keep existing vectors/`dgpv1` behavior green.
-  - [x] Current wire-vector and `pkg/dgpv1` tests pass at `ac8fd30`.
+- [ ] Preserve wire compatibility and keep existing vectors/`dgproto` behavior green.
+  - [x] Current wire-vector and `pkg/dgproto` tests pass at `ac8fd30`.
   - [ ] Record release evidence that committed vectors and compatibility were not unintentionally changed.
 - [ ] Pass `go test ./...`, `go test -race ./... -count=10`, and `go vet ./...`.
   - [x] `go test ./...` and `go vet ./...` pass in this audit.
-  - [ ] Focused race attempt on `pkg/dgpserver` and `pkg/dgpv1` failed exactly with `go: -race requires cgo; enable cgo by setting CGO_ENABLED=1`; keep this gate open.
+  - [ ] Focused race attempt on `pkg/dgpserver` and `pkg/dgproto` failed exactly with `go: -race requires cgo; enable cgo by setting CGO_ENABLED=1`; keep this gate open.
 - [ ] Demonstrate no races, goroutine/connection leaks, double hooks, or callbacks started after cancellation.
   - [x] The normal admitted real-TCP path asserts one disconnect callback.
   - [ ] Add race/leak/stress coverage and the complete cancellation/abnormal-exit hook matrix.
@@ -406,7 +406,7 @@ Do **not** include in the first release:
   - [x] Local wrapper errors sanitize causes, and authentication/hook/handler panic paths are recovered in focused tests.
   - [ ] Audit peer-visible responses and logging end to end; the migrated command logs remote addresses explicitly.
 - [ ] Fuzz/property-test malformed messages, decoder errors, registration conflicts, and shutdown/send races.
-  - [x] `pkg/dgpv1` contains malformed-parser fuzz coverage.
+  - [x] `pkg/dgproto` contains malformed-parser fuzz coverage.
   - [x] Add bounded deterministic SDK registration/config fuzz/property tests.
   - [x] Add deterministic SDK decoder-error table/property/fuzz coverage, including runtime `ErrorHandler` propagation.
   - [x] Add deterministic shutdown/send race property tests covering send variants, cancellation/terminal precedence, waiter release, close idempotence, control-close priority, handler/disconnect rejection, and stable terminal cause.
@@ -438,12 +438,12 @@ The sections below are implementation inventory only. Where wording conflicts, t
 
 # DGP Server SDK Roadmap
 
-This document tracks the work required to turn the low-level `pkg/dgpv1` protocol
+This document tracks the work required to turn the low-level `pkg/dgproto` protocol
 implementation into a convenient, safe, production-oriented Go server SDK.
 
 The protocol core must remain independent from application concerns. New
 high-level functionality should therefore live in `pkg/dgpserver` and build on
-`pkg/dgpv1` without changing the DGP v1 wire format.
+`pkg/dgproto` without changing the DGP v1 wire format.
 
 ## Design principles
 
@@ -452,13 +452,13 @@ high-level functionality should therefore live in `pkg/dgpserver` and build on
 - **Typed application API:** most server applications should not need type
   switches over `any` or direct access to frames, sessions, or rekeying.
 - **Protocol-core isolation:** routing, middleware, logging, and application
-  state must not leak into `dgpv1`.
+  state must not leak into `dgproto`.
 - **Explicit lifecycle:** connect, message, disconnect, and shutdown behavior
   must be deterministic and documented.
 - **Composable API:** middleware and handlers should be independently testable.
 - **Observable operation:** errors should be classifiable and hooks should make
   metrics and structured logging straightforward.
-- **Backward compatibility:** existing `dgpv1.Server`, `Connection`, and
+- **Backward compatibility:** existing `dgproto.Server`, `Connection`, and
   `Session` users must continue to work.
 
 ---
@@ -466,7 +466,7 @@ high-level functionality should therefore live in `pkg/dgpserver` and build on
 ## Phase 0 — Architecture and public API
 
 - [ ] Add `pkg/dgpserver` with package documentation.
-- [ ] Define the boundary between `dgpserver` and `dgpv1`.
+- [ ] Define the boundary between `dgpserver` and `dgproto`.
 - [ ] Decide which low-level objects are intentionally exposed through the
       high-level API.
 - [ ] Define stable public types:
@@ -516,7 +516,7 @@ return srv.Serve(ctx, listener)
 - [ ] Implement request-scoped `Context` embedding or exposing
       `context.Context`.
 - [ ] Expose the active high-level connection through a narrow interface rather
-      than requiring direct mutation of `dgpv1.Connection`.
+      than requiring direct mutation of `dgproto.Connection`.
 - [ ] Implement immutable `Peer` metadata:
   - [ ] Noise static public key
   - [ ] DGP session ID
@@ -538,13 +538,13 @@ return srv.Serve(ctx, listener)
 - Handlers can identify the authenticated peer without inspecting handshake
   internals.
 - Every potentially blocking operation accepts or inherits a context.
-- Context helpers preserve `dgpv1` queue bounds and error identity.
+- Context helpers preserve `dgproto` queue bounds and error identity.
 
 ---
 
 ## Phase 2 — Typed router
 
-- [ ] Implement a router that adapts to `dgpv1.MessageHandler`.
+- [ ] Implement a router that adapts to `dgproto.MessageHandler`.
 - [ ] Provide typed registration methods for MVP application messages:
   - [ ] `HandleEncryptedData`
   - [ ] `HandleAck`
@@ -667,7 +667,7 @@ type Authenticator interface {
 - [ ] Implement `Serve(context.Context, net.Listener) error`.
 - [ ] Optionally provide `ListenAndServe` as a convenience wrapper; keep
       listener creation injectable for tests and deployment flexibility.
-- [ ] Map high-level configuration to `dgpv1.ServerConfig`.
+- [ ] Map high-level configuration to `dgproto.ServerConfig`.
 - [ ] Add configuration validation and documented defaults for:
   - [ ] handshake timeout
   - [ ] read/write timeout
@@ -699,7 +699,7 @@ type Authenticator interface {
       completion; name methods accordingly.
 - [ ] Add optional delivery result/future only if applications require it.
 - [ ] Define ordering guarantees for concurrent sends.
-- [ ] Preserve automatic rekey ordering inside `dgpv1.Connection`.
+- [ ] Preserve automatic rekey ordering inside `dgproto.Connection`.
 - [ ] Define behavior when sending from a disconnect hook or canceled handler.
 - [ ] Add saturation, cancellation, close-race, and fairness tests.
 
@@ -750,7 +750,7 @@ type Authenticator interface {
   - [ ] authentication/trust model
   - [ ] key storage and rotation
   - [ ] deployment timeouts and limits
-- [ ] Add a migration guide from direct `dgpv1.Server` usage.
+- [ ] Add a migration guide from direct `dgproto.Server` usage.
 - [ ] Keep examples free of embedded production secrets.
 
 ### Acceptance criteria
@@ -803,7 +803,7 @@ The first implementation should remain deliberately small:
 - [x] Implement typed routing for `EncryptedData`, `Ack`, and `ErrorMessage`.
 - [x] Implement middleware composition.
 - [x] Implement `OnConnect` and `OnDisconnect` exactly-once hooks.
-- [x] Adapt the router to the existing `dgpv1.Server`.
+- [x] Adapt the router to the existing `dgproto.Server`.
 - [x] Add a real-TCP echo integration test.
 - [x] Add a minimal package example.
 
@@ -835,28 +835,28 @@ Features intentionally deferred from the first slice:
 - [x] Expose and test release version metadata through `-version`.
 - [ ] Define target infrastructure, operational ownership, and credentials before adding any production deployment.
 
-## Go 1.25 and DGPv1 audit (current tree)
+## Go 1.25 and DGProto v1 audit (current tree)
 
 Audit basis: all 65 Go source/test files at `f71984f`, `docs/protocol/dgp-v1.md`, and `docs/dgpserver/`; implementation code was not changed by this audit.
 
 ### Go 1.25 modernization
 
-- [x] Replace the audited manual `WaitGroup.Add(1)` + goroutine + deferred `Done` ownership with `WaitGroup.Go` at `pkg/dgpserver/dgpserver_test.go`, `pkg/dgpserver/shutdown_send_property_test.go`, `pkg/dgpv1/rekey_test.go`, `pkg/dgpv1/send_shutdown_property_test.go`, `pkg/dgpv1/server.go`, `pkg/dgpv1/session_test.go`, and `pkg/dgpv1/tcp_test.go`. The production server still registers each accepted transport before launching its owned goroutine, and `Close` waits for the same handler lifecycle; no protocol path changed.
-- [x] Review the aggregate lifecycle accounting in `pkg/dgpv1/connection.go`. The original `Add(loops)` count corresponded one-for-one to the read, write, maintenance, and optional handler goroutines, and each loop's only `Done` was its entry defer. Replacing those launches with `WaitGroup.Go` is therefore equivalent: the same loops are included before the waiter starts, loop-local cleanup remains unchanged, and shutdown still occurs only after all runtime loops return.
-- [x] Replace the audited equivalent zero-based exclusive counting loops in `pkg/dgpv1/audit_test.go` and `pkg/dgpv1/send_api_test.go` with range-over-int. The inclusive replay-window loop in `pkg/dgpv1/session_test.go` was intentionally retained because a direct `range ReplayWindowSize` rewrite would change its boundary.
+- [x] Replace the audited manual `WaitGroup.Add(1)` + goroutine + deferred `Done` ownership with `WaitGroup.Go` at `pkg/dgpserver/dgpserver_test.go`, `pkg/dgpserver/shutdown_send_property_test.go`, `pkg/dgproto/rekey_test.go`, `pkg/dgproto/send_shutdown_property_test.go`, `pkg/dgproto/server.go`, `pkg/dgproto/session_test.go`, and `pkg/dgproto/tcp_test.go`. The production server still registers each accepted transport before launching its owned goroutine, and `Close` waits for the same handler lifecycle; no protocol path changed.
+- [x] Review the aggregate lifecycle accounting in `pkg/dgproto/connection.go`. The original `Add(loops)` count corresponded one-for-one to the read, write, maintenance, and optional handler goroutines, and each loop's only `Done` was its entry defer. Replacing those launches with `WaitGroup.Go` is therefore equivalent: the same loops are included before the waiter starts, loop-local cleanup remains unchanged, and shutdown still occurs only after all runtime loops return.
+- [x] Replace the audited equivalent zero-based exclusive counting loops in `pkg/dgproto/audit_test.go` and `pkg/dgproto/send_api_test.go` with range-over-int. The inclusive replay-window loop in `pkg/dgproto/session_test.go` was intentionally retained because a direct `range ReplayWindowSize` rewrite would change its boundary.
 - [x] Enable the golangci-lint v2.11.4 equivalents of `waitgroupgo` and `rangeint`: revive rule `use-waitgroup-go` and linter `intrange`. The full configured repository run completed with zero issues; no benchmark-loop change was required.
 
 ### Protocol contract review
 
 No provable implementation/specification mismatch was found in the audited framing and wire encoding, handshake profile/session-ID derivation, directional keys/nonces, state transitions, reserved-header/AAD handling, replay window, rekey transition/grace rules, close semantics, message registry, or bounded runtime paths. Two specification gaps should still be closed before compatibility guarantees are declared; they are not recorded as implementation defects because the current normative text does not state the opposite behavior:
 
-- [ ] Specify the protocol-wide maximum frame size. The normative header carries a `uint32` payload length and defines frame-size arithmetic without an explicit maximum (`docs/protocol/dgp-v1.md:131-170`), while `pkg/dgpv1/header.go:15-16` fixes `MaxFrameSize = 65535` and `pkg/dgpv1/header.go:118-120` rejects larger frames. Document the intended limit and compatibility requirement before any implementation change.
-- [ ] Specify whether duplicate application TLV types are permitted. The generic TLV envelope scopes identifiers to the enclosing message but does not define duplicate handling (`docs/protocol/dgp-v1.md:83-103`); `EncryptedData` rejects duplicates on send and receive (`pkg/dgpv1/messages.go:222-255`, `pkg/dgpv1/messages.go:296-305`). Resolve the normative ambiguity before changing parser behavior or vectors.
+- [ ] Specify the protocol-wide maximum frame size. The normative header carries a `uint32` payload length and defines frame-size arithmetic without an explicit maximum (`docs/protocol/dgp-v1.md:131-170`), while `pkg/dgproto/header.go:15-16` fixes `MaxFrameSize = 65535` and `pkg/dgproto/header.go:118-120` rejects larger frames. Document the intended limit and compatibility requirement before any implementation change.
+- [ ] Specify whether duplicate application TLV types are permitted. The generic TLV envelope scopes identifiers to the enclosing message but does not define duplicate handling (`docs/protocol/dgp-v1.md:83-103`); `EncryptedData` rejects duplicates on send and receive (`pkg/dgproto/messages.go:222-255`, `pkg/dgproto/messages.go:296-305`). Resolve the normative ambiguity before changing parser behavior or vectors.
 
 ### Verification snapshot
 
 - Modernization remediation: `gofmt` was applied only to the ten changed Go files; `gofmt -l` reports none of those files.
-- Modernization remediation: `go test ./pkg/dgpserver ./pkg/dgpv1` and `go vet ./pkg/dgpserver ./pkg/dgpv1` pass (exit 0).
+- Modernization remediation: `go test ./pkg/dgpserver ./pkg/dgproto` and `go vet ./pkg/dgpserver ./pkg/dgproto` pass (exit 0).
 - Earlier audit: `go test ./...`, `go vet ./...`, and focused `go vet -waitgroup ./...` passed on Go 1.26.5 windows/amd64.
 - `go test -race ./...`: not run successfully; exact toolchain error was `go: -race requires cgo; enable cgo by setting CGO_ENABLED=1` (`CGO_ENABLED=0`). On Windows, `where gcc` found no compiler, so the requested CGO-enabled retry was unavailable without installing a toolchain. Keep the race release gate open.
 - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run ./...` completed with zero issues, including `intrange` and revive `use-waitgroup-go`.

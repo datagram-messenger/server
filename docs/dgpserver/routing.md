@@ -6,7 +6,7 @@ A zero-value `Router` is ready for registration. The convenience methods preserv
 
 ```go
 var router dgpserver.Router
-if err := router.HandleAck(func(ctx *dgpserver.Context, ack *dgpv1.Ack) error {
+if err := router.HandleAck(func(ctx *dgpserver.Context, ack *dgproto.Ack) error {
     // ack is already type checked.
     return nil
 }); err != nil {
@@ -14,9 +14,9 @@ if err := router.HandleAck(func(ctx *dgpserver.Context, ack *dgpv1.Ack) error {
 }
 ```
 
-Equivalent generic registration is `dgpserver.Handle[dgpv1.Ack](&router, handler)` (type inference usually makes the explicit argument unnecessary). The type argument is the non-pointer message type; the callback receives `*T`. Registration rejects nil handlers, unsupported protocol types, duplicate routes, and mutation after freeze.
+Equivalent generic registration is `dgpserver.Handle[dgproto.Ack](&router, handler)` (type inference usually makes the explicit argument unnecessary). The type argument is the non-pointer message type; the callback receives `*T`. Registration rejects nil handlers, unsupported protocol types, duplicate routes, and mutation after freeze.
 
-Inbound values passed to `Router.Dispatch` and `Dispatch` must be pointers. This matches `dgpv1.Session.Receive` and avoids ambiguous copies.
+Inbound values passed to `Router.Dispatch` and `Dispatch` must be pointers. This matches `dgproto.Session.Receive` and avoids ambiguous copies.
 
 ## Application command routing
 
@@ -24,13 +24,13 @@ Inbound values passed to `Router.Dispatch` and `Dispatch` must be pointers. This
 
 ```go
 commands := dgpserver.NewCommandRouter(dgpserver.CommandDecoderFunc(
-    func(message *dgpv1.EncryptedData) (dgpserver.Command, any, error) {
+    func(message *dgproto.EncryptedData) (dgpserver.Command, any, error) {
         return dgpserver.Command(message.AppMessageType), message, nil
     },
 ))
 if err := commands.Handle(0x01, dgpserver.HandlerFunc(
     func(ctx *dgpserver.Context, payload any) error {
-        message, ok := payload.(*dgpv1.EncryptedData)
+        message, ok := payload.(*dgproto.EncryptedData)
         if !ok {
             return dgpserver.ErrInvalidMessageForm
         }

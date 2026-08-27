@@ -1,4 +1,4 @@
-# Datagram Protocol Version 1 (DGPv1) Specification
+# Datagram Protocol Version 1 (DGProto v1) Specification
 
 **Status:** Draft — Implementation Track
 **Version:** 1.0.0
@@ -13,12 +13,12 @@
 
 ### 1.1 Executive Summary
 
-DGPv1 is a binary, session-oriented, cryptographically secured application
+DGProto v1 is a binary, session-oriented, cryptographically secured application
 protocol designed for low-latency, bidirectional, multiplexed communication
 between native desktop clients (Rust, embedded in Tauri v2) and
 high-concurrency Go microservice backends.
 
-DGPv1 separates transport, framing, cryptographic, session, and application
+DGProto v1 separates transport, framing, cryptographic, session, and application
 layers. The current MVP carries its fixed binary frames over TCP and uses the
 Noise Protocol Framework, modern AEAD, and HKDF-based key schedules rather
 than bespoke cryptographic constructions.
@@ -78,7 +78,7 @@ Future profiles may substitute layers only after separate specification.
 
 ### 2.2 Byte Ordering
 
-All multi-byte integer fields in DGPv1 are encoded **Little-Endian**,
+All multi-byte integer fields in DGProto v1 are encoded **Little-Endian**,
 chosen to match native encoding on the overwhelming majority of deployment
 targets (x86_64, aarch64) and to avoid byte-swapping overhead in the
 zero-copy Rust parsing path.
@@ -208,7 +208,7 @@ signature. Encrypted-frame AAD is exactly `header[0:40] || padding`. This change
 
 The MVP uses only `Noise_XX_25519_ChaChaPoly_SHA256`. It is a three-flight,
 1.5-RTT mutual-authentication handshake. Implementations MUST reject any
-other pattern in the MVP profile. Before processing the first Noise token, both peers MUST call `MixHash(prologue)` with the exact five ASCII octets `44 47 50 76 31` (`DGPv1`), with no NUL terminator, length prefix, or newline.
+other pattern in the MVP profile. Before processing the first Noise token, both peers MUST call `MixHash(prologue)` with the exact five ASCII octets `44 47 50 76 31` (`DGProto v1`), with no NUL terminator, length prefix, or newline.
 
 ### 4.2 Phase 1 — Client Hello / Ephemeral Key Exchange (Msg Type `0x01`)
 
@@ -223,15 +223,15 @@ HandshakeInit Payload:
 +----------------------+----------+--------------------------------+
 ```
 
-Noise XX message 1 is `→ e`. Its payload is exactly 36 bytes in the DGPv1
+Noise XX message 1 is `→ e`. Its payload is exactly 36 bytes in the DGProto v1
 wrapper. It carries no Noise payload, static key material, or application data.
 
 ### 4.3 Phases 2–3 — Authentication & Key Derivation (Msg Type `0x02`)
 
-Noise XX always has three messages. DGPv1 carries both the server's second
+Noise XX always has three messages. DGProto v1 carries both the server's second
 flight and the client's third flight in handshake frames with message type
 `0x02`; direction and handshake state distinguish the two payload shapes.
-Neither frame has an outer DGPv1 AEAD tag.
+Neither frame has an outer DGProto v1 AEAD tag.
 
 ```
 HandshakeResponse Payload (server → client, Noise XX message 2):
@@ -251,11 +251,11 @@ HandshakeFinish Payload (client → server, Noise XX message 3):
 ```
 
 The client and server MUST NOT enter the encrypted-session state or use the
-Session ID until message 3 has been produced or authenticated, respectively. Let `channel_binding` be Noise's final 32-byte handshake hash returned by `ChannelBinding()` after message 3. Both peers MUST derive `SessionID = SHA-256(ASCII("DGPv1 SessionID") || channel_binding)[0:16]`; concatenation has no separator or length prefix.
+Session ID until message 3 has been produced or authenticated, respectively. Let `channel_binding` be Noise's final 32-byte handshake hash returned by `ChannelBinding()` after message 3. Both peers MUST derive `SessionID = SHA-256(ASCII("DGProto v1 SessionID") || channel_binding)[0:16]`; concatenation has no separator or length prefix.
 At that point both parties compute the full Diffie-Hellman transcript and
 derive the session key schedule via the Noise `Split()` convention. The two
 independent, directional 256-bit traffic keys are exactly the standard Noise
-`Split()` outputs; DGPv1 MUST NOT apply an additional HKDF or label. In the
+`Split()` outputs; DGProto v1 MUST NOT apply an additional HKDF or label. In the
 canonical Noise order `(k1, k2) = Split()`, `k1` protects initiator-to-responder
 traffic and `k2` protects responder-to-initiator traffic. The client therefore
 uses `k1` to send and `k2` to receive; the server uses `k2` to send and `k1` to
@@ -315,11 +315,11 @@ For current directional traffic secret `K` and proposed epoch `E`, the sender
 MUST compute:
 
 ```
-KeyConfirm = HMAC-SHA256(K, "DGPv1 Rekey Confirm" || LE32(E))
-K_next     = HMAC-SHA256(K, "DGPv1 Rekey Send Key")
+KeyConfirm = HMAC-SHA256(K, "DGProto v1 Rekey Confirm" || LE32(E))
+K_next     = HMAC-SHA256(K, "DGProto v1 Rekey Send Key")
 ```
 
-The label `"DGPv1 Rekey Receive Key"` is reserved as the receive-labelled
+The label `"DGProto v1 Rekey Receive Key"` is reserved as the receive-labelled
 output of the key-ratchet API. On the wire, both peers ratchet the same
 directional secret with the send label, so the sender's next send key equals
 the receiver's next receive key.
@@ -488,7 +488,7 @@ frame) to reduce control-message overhead under high message throughput.
 
 ### 7.1 Threat Model
 
-DGPv1 is designed against the following adversary classes:
+DGProto v1 is designed against the following adversary classes:
 
 - **Passive network observer** — capable of recording all traffic on the
   path, attempting traffic analysis, protocol fingerprinting, or
@@ -496,7 +496,7 @@ DGPv1 is designed against the following adversary classes:
 - **Active on-path adversary (MitM)** — capable of intercepting,
   modifying, injecting, or replaying frames.
 - **DPI / censorship middlebox** — attempting to classify and selectively
-  block DGPv1 traffic based on static byte signatures or packet-length
+  block DGProto v1 traffic based on static byte signatures or packet-length
   distributions.
 - **Malicious or compromised relay** — a future node forwarding traffic
   that must not be able to decrypt session content even if it can observe
@@ -538,7 +538,7 @@ non-constant-time comparisons). Accordingly:
 
 ## 8. Historical / Post-MVP Design Notes (Non-Normative)
 
-Earlier DGPv1 drafts proposed the following extensions. They are retained as
+Earlier DGProto v1 drafts proposed the following extensions. They are retained as
 protocol history only. Normative terms in this section do not apply to the MVP.
 An MVP implementation MUST NOT require, advertise, or send them:
 
@@ -551,4 +551,4 @@ An MVP implementation MUST NOT require, advertise, or send them:
 These ideas require a future versioned profile with complete wire semantics,
 negotiation, downgrade protection, replay policy, and interoperability tests.
 
-*End of DGPv1 Specification.*
+*End of DGProto v1 Specification.*

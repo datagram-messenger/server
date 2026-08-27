@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 )
 
 // Command identifies an application command carried by EncryptedData.
@@ -12,14 +12,14 @@ type Command uint8
 
 // CommandDecoder extracts a command and codec-specific payload from EncryptedData.
 type CommandDecoder interface {
-	DecodeCommand(*dgpv1.EncryptedData) (Command, any, error)
+	DecodeCommand(*dgproto.EncryptedData) (Command, any, error)
 }
 
 // CommandDecoderFunc adapts a function to CommandDecoder.
-type CommandDecoderFunc func(*dgpv1.EncryptedData) (Command, any, error)
+type CommandDecoderFunc func(*dgproto.EncryptedData) (Command, any, error)
 
 // DecodeCommand calls f.
-func (f CommandDecoderFunc) DecodeCommand(message *dgpv1.EncryptedData) (Command, any, error) {
+func (f CommandDecoderFunc) DecodeCommand(message *dgproto.EncryptedData) (Command, any, error) {
 	return f(message)
 }
 
@@ -132,13 +132,13 @@ func (r *CommandRouter) handleLocked(command Command, handler Handler, groupMidd
 }
 
 // Handler returns a typed EncryptedData handler suitable for RegisterTyped.
-func (r *CommandRouter) Handler() TypedHandlerFunc[dgpv1.EncryptedData] {
-	return func(ctx *Context, message *dgpv1.EncryptedData) error {
+func (r *CommandRouter) Handler() TypedHandlerFunc[dgproto.EncryptedData] {
+	return func(ctx *Context, message *dgproto.EncryptedData) error {
 		return r.dispatch(ctx, message)
 	}
 }
 
-func (r *CommandRouter) dispatch(ctx *Context, message *dgpv1.EncryptedData) error {
+func (r *CommandRouter) dispatch(ctx *Context, message *dgproto.EncryptedData) error {
 	if r == nil || r.decoder == nil {
 		return ErrNilHandler
 	}

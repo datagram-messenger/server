@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 )
 
 var errDecoderRejected = errors.New("decoder rejected application payload")
@@ -24,23 +24,23 @@ func (e *decoderPathError) Unwrap() error { return e.err }
 func TestCommandRouterDecoderFailureContract(t *testing.T) {
 	tests := []struct {
 		name       string
-		message    *dgpv1.EncryptedData
-		decode     func(*dgpv1.EncryptedData) (Command, any, error)
+		message    *dgproto.EncryptedData
+		decode     func(*dgproto.EncryptedData) (Command, any, error)
 		want       error
 		wantAsKind int
 	}{
 		{
 			name:    "sentinel",
-			message: &dgpv1.EncryptedData{AppMessageType: 1},
-			decode: func(*dgpv1.EncryptedData) (Command, any, error) {
+			message: &dgproto.EncryptedData{AppMessageType: 1},
+			decode: func(*dgproto.EncryptedData) (Command, any, error) {
 				return 1, nil, errDecoderRejected
 			},
 			want: errDecoderRejected,
 		},
 		{
 			name:    "wrapped typed error",
-			message: &dgpv1.EncryptedData{AppMessageType: 1},
-			decode: func(*dgpv1.EncryptedData) (Command, any, error) {
+			message: &dgproto.EncryptedData{AppMessageType: 1},
+			decode: func(*dgproto.EncryptedData) (Command, any, error) {
 				return 1, nil, fmt.Errorf("codec boundary: %w", &decoderPathError{kind: 7, err: errDecoderRejected})
 			},
 			want:       errDecoderRejected,
@@ -48,8 +48,8 @@ func TestCommandRouterDecoderFailureContract(t *testing.T) {
 		},
 		{
 			name:    "codec-defined malformed payload",
-			message: &dgpv1.EncryptedData{AppMessageType: 1, Fields: []dgpv1.TLV{{Type: 0x80}}},
-			decode: func(message *dgpv1.EncryptedData) (Command, any, error) {
+			message: &dgproto.EncryptedData{AppMessageType: 1, Fields: []dgproto.TLV{{Type: 0x80}}},
+			decode: func(message *dgproto.EncryptedData) (Command, any, error) {
 				if len(message.Fields) != 0 {
 					return 0, nil, errDecoderRejected
 				}
@@ -59,8 +59,8 @@ func TestCommandRouterDecoderFailureContract(t *testing.T) {
 		},
 		{
 			name:    "unknown command",
-			message: &dgpv1.EncryptedData{AppMessageType: 2},
-			decode: func(message *dgpv1.EncryptedData) (Command, any, error) {
+			message: &dgproto.EncryptedData{AppMessageType: 2},
+			decode: func(message *dgproto.EncryptedData) (Command, any, error) {
 				return Command(message.AppMessageType), message, nil
 			},
 			want: ErrNotHandled,
@@ -70,7 +70,7 @@ func TestCommandRouterDecoderFailureContract(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var decoderCalls, handlerCalls atomic.Int32
-			commands := NewCommandRouter(CommandDecoderFunc(func(message *dgpv1.EncryptedData) (Command, any, error) {
+			commands := NewCommandRouter(CommandDecoderFunc(func(message *dgproto.EncryptedData) (Command, any, error) {
 				decoderCalls.Add(1)
 				return test.decode(message)
 			}))
@@ -82,7 +82,7 @@ func TestCommandRouterDecoderFailureContract(t *testing.T) {
 			}
 
 			err := Dispatch(context.Background(), HandlerFunc(func(ctx *Context, message any) error {
-				return commands.Handler()(ctx, message.(*dgpv1.EncryptedData))
+				return commands.Handler()(ctx, message.(*dgproto.EncryptedData))
 			}), Peer{}, nil, test.message)
 			if !errors.Is(err, test.want) {
 				t.Fatalf("Dispatch() = %v, want match for %v", err, test.want)
@@ -105,14 +105,14 @@ func TestCommandRouterDecoderFailureContract(t *testing.T) {
 
 func TestCommandRouterNilMessageRejectedBeforeDecoder(t *testing.T) {
 	var decoderCalls atomic.Int32
-	commands := NewCommandRouter(CommandDecoderFunc(func(message *dgpv1.EncryptedData) (Command, any, error) {
+	commands := NewCommandRouter(CommandDecoderFunc(func(message *dgproto.EncryptedData) (Command, any, error) {
 		decoderCalls.Add(1)
 		return 1, message, nil
 	}))
 
 	err := Dispatch(context.Background(), HandlerFunc(func(ctx *Context, message any) error {
-		return commands.Handler()(ctx, message.(*dgpv1.EncryptedData))
-	}), Peer{}, nil, (*dgpv1.EncryptedData)(nil))
+		return commands.Handler()(ctx, message.(*dgproto.EncryptedData))
+	}), Peer{}, nil, (*dgproto.EncryptedData)(nil))
 	if !errors.Is(err, ErrInvalidMessageForm) {
 		t.Fatalf("Dispatch() = %v, want %v", err, ErrInvalidMessageForm)
 	}
@@ -123,7 +123,7 @@ func TestCommandRouterNilMessageRejectedBeforeDecoder(t *testing.T) {
 
 func TestCommandRouterDecoderPanicUsesDispatchSafetyBoundary(t *testing.T) {
 	var handlerCalls atomic.Int32
-	commands := NewCommandRouter(CommandDecoderFunc(func(*dgpv1.EncryptedData) (Command, any, error) {
+	commands := NewCommandRouter(CommandDecoderFunc(func(*dgproto.EncryptedData) (Command, any, error) {
 		panic("decoder panic")
 	}))
 	if err := commands.Handle(1, HandlerFunc(func(*Context, any) error {
@@ -134,8 +134,8 @@ func TestCommandRouterDecoderPanicUsesDispatchSafetyBoundary(t *testing.T) {
 	}
 
 	err := Dispatch(context.Background(), HandlerFunc(func(ctx *Context, message any) error {
-		return commands.Handler()(ctx, message.(*dgpv1.EncryptedData))
-	}), Peer{}, nil, &dgpv1.EncryptedData{AppMessageType: 1})
+		return commands.Handler()(ctx, message.(*dgproto.EncryptedData))
+	}), Peer{}, nil, &dgproto.EncryptedData{AppMessageType: 1})
 	if !errors.Is(err, ErrHandlerPanic) {
 		t.Fatalf("Dispatch() = %v, want %v", err, ErrHandlerPanic)
 	}
@@ -152,7 +152,7 @@ func TestServerHandlePropagatesDecoderErrorToErrorHandlerExactlyOnce(t *testing.
 	secret := "application-payload-secret"
 	decodeErr := &decoderPathError{kind: 9, err: errDecoderRejected}
 	var decoderCalls, handlerCalls, errorHandlerCalls atomic.Int32
-	commands := NewCommandRouter(CommandDecoderFunc(func(*dgpv1.EncryptedData) (Command, any, error) {
+	commands := NewCommandRouter(CommandDecoderFunc(func(*dgproto.EncryptedData) (Command, any, error) {
 		decoderCalls.Add(1)
 		return 1, nil, decodeErr
 	}))
@@ -183,9 +183,9 @@ func TestServerHandlePropagatesDecoderErrorToErrorHandlerExactlyOnce(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn := new(dgpv1.Connection)
+	conn := new(dgproto.Connection)
 	server.states.Store(conn, connectionState{})
-	if err := server.handle(context.Background(), conn, &dgpv1.EncryptedData{Fields: []dgpv1.TLV{{Type: 1, Value: []byte(secret)}}}); err != nil {
+	if err := server.handle(context.Background(), conn, &dgproto.EncryptedData{Fields: []dgproto.TLV{{Type: 1, Value: []byte(secret)}}}); err != nil {
 		t.Fatalf("handle() = %v", err)
 	}
 	if decoderCalls.Load() != 1 || errorHandlerCalls.Load() != 1 || handlerCalls.Load() != 0 {
@@ -193,7 +193,7 @@ func TestServerHandlePropagatesDecoderErrorToErrorHandlerExactlyOnce(t *testing.
 	}
 
 	server.config.ErrorHandler = nil
-	err = server.handle(context.Background(), conn, &dgpv1.EncryptedData{Fields: []dgpv1.TLV{{Type: 1, Value: []byte(secret)}}})
+	err = server.handle(context.Background(), conn, &dgproto.EncryptedData{Fields: []dgproto.TLV{{Type: 1, Value: []byte(secret)}}})
 	var handlerError *HandlerError
 	if !errors.As(err, &handlerError) || !errors.Is(err, errDecoderRejected) {
 		t.Fatalf("default handle error = %v", err)
@@ -220,7 +220,7 @@ func FuzzCommandRouterDecoderPaths(f *testing.F) {
 	f.Fuzz(func(t *testing.T, mode, command uint8, payload []byte) {
 		mode %= 5
 		var decoderCalls, handlerCalls atomic.Int32
-		commands := NewCommandRouter(CommandDecoderFunc(func(message *dgpv1.EncryptedData) (Command, any, error) {
+		commands := NewCommandRouter(CommandDecoderFunc(func(message *dgproto.EncryptedData) (Command, any, error) {
 			decoderCalls.Add(1)
 			switch mode {
 			case 1:
@@ -239,12 +239,12 @@ func FuzzCommandRouterDecoderPaths(f *testing.F) {
 		})); err != nil {
 			t.Fatal(err)
 		}
-		message := &dgpv1.EncryptedData{AppMessageType: command}
+		message := &dgproto.EncryptedData{AppMessageType: command}
 		if len(payload) != 0 {
-			message.Fields = []dgpv1.TLV{{Type: 1, Value: payload}}
+			message.Fields = []dgproto.TLV{{Type: 1, Value: payload}}
 		}
 		err := Dispatch(context.Background(), HandlerFunc(func(ctx *Context, message any) error {
-			return commands.Handler()(ctx, message.(*dgpv1.EncryptedData))
+			return commands.Handler()(ctx, message.(*dgproto.EncryptedData))
 		}), Peer{}, nil, message)
 
 		if decoderCalls.Load() != 1 {

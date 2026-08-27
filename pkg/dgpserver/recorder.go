@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 )
 
 // RecordedSend is one defensively copied send accepted by Recorder.
@@ -129,32 +129,32 @@ func cloneRecorded(items []RecordedSend) []RecordedSend {
 
 func cloneMessage(message any) any {
 	switch value := message.(type) {
-	case dgpv1.EncryptedData:
+	case dgproto.EncryptedData:
 		copy := cloneEncrypted(value)
 		return copy
-	case *dgpv1.EncryptedData:
+	case *dgproto.EncryptedData:
 		if value == nil {
-			return (*dgpv1.EncryptedData)(nil)
+			return (*dgproto.EncryptedData)(nil)
 		}
 		copy := cloneEncrypted(*value)
 		return &copy
-	case dgpv1.Ack:
-		return dgpv1.Ack{Sequences: append([]uint64(nil), value.Sequences...)}
-	case *dgpv1.Ack:
+	case dgproto.Ack:
+		return dgproto.Ack{Sequences: append([]uint64(nil), value.Sequences...)}
+	case *dgproto.Ack:
 		if value == nil {
-			return (*dgpv1.Ack)(nil)
+			return (*dgproto.Ack)(nil)
 		}
-		return &dgpv1.Ack{Sequences: append([]uint64(nil), value.Sequences...)}
+		return &dgproto.Ack{Sequences: append([]uint64(nil), value.Sequences...)}
 	default:
 		return message
 	}
 }
 
-func cloneEncrypted(value dgpv1.EncryptedData) dgpv1.EncryptedData {
+func cloneEncrypted(value dgproto.EncryptedData) dgproto.EncryptedData {
 	out := value
-	out.Fields = make([]dgpv1.TLV, len(value.Fields))
+	out.Fields = make([]dgproto.TLV, len(value.Fields))
 	for index, field := range value.Fields {
-		out.Fields[index] = dgpv1.TLV{Type: field.Type, Value: append([]byte(nil), field.Value...)}
+		out.Fields[index] = dgproto.TLV{Type: field.Type, Value: append([]byte(nil), field.Value...)}
 	}
 	return out
 }

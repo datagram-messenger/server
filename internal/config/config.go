@@ -23,7 +23,7 @@ var (
 	ErrStaticKeyRequired = errors.New("config: static_key or static_key_file is required")
 )
 
-// Config contains validated runtime settings for the DGPv1 TCP server.
+// Config contains validated runtime settings for the DGProto v1 TCP server.
 type Config struct {
 	Address                 string
 	StaticKey               [staticKeySize]byte

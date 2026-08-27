@@ -7,7 +7,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 	"github.com/tr1xdev/datagram-server/pkg/dgpserver"
 )
 
@@ -16,8 +16,8 @@ func Example() {
 	ctx := recorder.NewContext(context.Background(), dgpserver.Peer{}, dgpserver.Metadata{}, dgpserver.Params{})
 
 	var router dgpserver.Router
-	if err := router.HandleEncryptedData(func(ctx *dgpserver.Context, message *dgpv1.EncryptedData) error {
-		return ctx.TrySend(&dgpv1.EncryptedData{
+	if err := router.HandleEncryptedData(func(ctx *dgpserver.Context, message *dgproto.EncryptedData) error {
+		return ctx.TrySend(&dgproto.EncryptedData{
 			StreamID:       message.StreamID,
 			AppMessageType: message.AppMessageType,
 			Fields:         message.Fields,
@@ -25,25 +25,25 @@ func Example() {
 	}); err != nil {
 		panic(err)
 	}
-	if err := router.Dispatch(ctx, &dgpv1.EncryptedData{StreamID: 7, AppMessageType: 1}); err != nil {
+	if err := router.Dispatch(ctx, &dgproto.EncryptedData{StreamID: 7, AppMessageType: 1}); err != nil {
 		panic(err)
 	}
 
-	reply := recorder.Snapshot()[0].Message.(*dgpv1.EncryptedData)
+	reply := recorder.Snapshot()[0].Message.(*dgproto.EncryptedData)
 	fmt.Println(reply.StreamID, reply.AppMessageType)
 	// Output: 7 1
 }
 
 func ExampleRouter_HandleEncryptedData() {
 	var router dgpserver.Router
-	if err := router.HandleEncryptedData(func(_ *dgpserver.Context, message *dgpv1.EncryptedData) error {
+	if err := router.HandleEncryptedData(func(_ *dgpserver.Context, message *dgproto.EncryptedData) error {
 		fmt.Println(message.StreamID)
 		return nil
 	}); err != nil {
 		panic(err)
 	}
 	ctx := dgpserver.NewContext(context.Background(), dgpserver.Peer{}, dgpserver.Metadata{}, dgpserver.Params{})
-	if err := router.Dispatch(ctx, &dgpv1.EncryptedData{StreamID: 7}); err != nil {
+	if err := router.Dispatch(ctx, &dgproto.EncryptedData{StreamID: 7}); err != nil {
 		panic(err)
 	}
 	// Output: 7
@@ -51,12 +51,12 @@ func ExampleRouter_HandleEncryptedData() {
 
 func ExampleCommandRouter() {
 	commands := dgpserver.NewCommandRouter(dgpserver.CommandDecoderFunc(
-		func(message *dgpv1.EncryptedData) (dgpserver.Command, any, error) {
+		func(message *dgproto.EncryptedData) (dgpserver.Command, any, error) {
 			return dgpserver.Command(message.AppMessageType), message, nil
 		},
 	))
 	if err := commands.Handle(1, dgpserver.HandlerFunc(func(_ *dgpserver.Context, payload any) error {
-		fmt.Println(payload.(*dgpv1.EncryptedData).StreamID)
+		fmt.Println(payload.(*dgproto.EncryptedData).StreamID)
 		return nil
 	})); err != nil {
 		panic(err)
@@ -66,7 +66,7 @@ func ExampleCommandRouter() {
 		panic(err)
 	}
 	ctx := dgpserver.NewContext(context.Background(), dgpserver.Peer{}, dgpserver.Metadata{}, dgpserver.Params{})
-	if err := router.Dispatch(ctx, &dgpv1.EncryptedData{AppMessageType: 1, StreamID: 9}); err != nil {
+	if err := router.Dispatch(ctx, &dgproto.EncryptedData{AppMessageType: 1, StreamID: 9}); err != nil {
 		panic(err)
 	}
 	// Output: 9
@@ -74,7 +74,7 @@ func ExampleCommandRouter() {
 
 func ExampleCommandRouter_Group() {
 	commands := dgpserver.NewCommandRouter(dgpserver.CommandDecoderFunc(
-		func(message *dgpv1.EncryptedData) (dgpserver.Command, any, error) {
+		func(message *dgproto.EncryptedData) (dgpserver.Command, any, error) {
 			return dgpserver.Command(message.AppMessageType), message, nil
 		},
 	))
@@ -102,7 +102,7 @@ func ExampleCommandRouter_Group() {
 		panic(err)
 	}
 	peer := dgpserver.NewPeer("example", [16]byte{}, nil)
-	if err := dgpserver.Dispatch(context.Background(), dgpserver.HandlerFunc(router.Dispatch), peer, "alice", &dgpv1.EncryptedData{AppMessageType: 2}); err != nil {
+	if err := dgpserver.Dispatch(context.Background(), dgpserver.HandlerFunc(router.Dispatch), peer, "alice", &dgproto.EncryptedData{AppMessageType: 2}); err != nil {
 		panic(err)
 	}
 	// Output: authorized
@@ -130,9 +130,9 @@ func ExampleServer_Shutdown() {
 		}
 		return ctx.Close()
 	}
-	configure := func(listener net.Listener, serverKey dgpv1.StaticKey, clientKey [32]byte) error {
+	configure := func(listener net.Listener, serverKey dgproto.StaticKey, clientKey [32]byte) error {
 		server, err := dgpserver.New(dgpserver.Config{
-			DGP: dgpv1.ServerConfig{
+			DGP: dgproto.ServerConfig{
 				StaticKey:        serverKey,
 				HandshakeTimeout: 10 * time.Second,
 				WriteTimeout:     10 * time.Second,

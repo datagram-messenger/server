@@ -5,16 +5,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 )
 
 func BenchmarkDispatchOverhead(b *testing.B) {
-	message := &dgpv1.EncryptedData{AppMessageType: 7, StreamID: 9}
+	message := &dgproto.EncryptedData{AppMessageType: 7, StreamID: 9}
 	handler := HandlerFunc(func(*Context, any) error { return nil })
 	handlerContext := NewContext(
 		context.Background(),
 		Peer{},
-		NewMetadata(dgpv1.MessageTypeEncryptedData, time.Unix(0, 0)),
+		NewMetadata(dgproto.MessageTypeEncryptedData, time.Unix(0, 0)),
 		Params{},
 	)
 
@@ -38,7 +38,7 @@ func BenchmarkDispatchOverhead(b *testing.B) {
 
 	b.Run("FrozenTypedRouter", func(b *testing.B) {
 		var router Router
-		if err := router.HandleEncryptedData(func(*Context, *dgpv1.EncryptedData) error { return nil }); err != nil {
+		if err := router.HandleEncryptedData(func(*Context, *dgproto.EncryptedData) error { return nil }); err != nil {
 			b.Fatal(err)
 		}
 		if err := router.Freeze(); err != nil {
@@ -62,7 +62,7 @@ func BenchmarkDispatchOverhead(b *testing.B) {
 		); err != nil {
 			b.Fatal(err)
 		}
-		if err := router.HandleEncryptedData(func(*Context, *dgpv1.EncryptedData) error { return nil }); err != nil {
+		if err := router.HandleEncryptedData(func(*Context, *dgproto.EncryptedData) error { return nil }); err != nil {
 			b.Fatal(err)
 		}
 		if err := router.Freeze(); err != nil {
@@ -79,7 +79,7 @@ func BenchmarkDispatchOverhead(b *testing.B) {
 
 	b.Run("FrozenCommandRouter", func(b *testing.B) {
 		commands := NewCommandRouter(CommandDecoderFunc(
-			func(message *dgpv1.EncryptedData) (Command, any, error) {
+			func(message *dgproto.EncryptedData) (Command, any, error) {
 				return Command(message.AppMessageType), message, nil
 			},
 		))

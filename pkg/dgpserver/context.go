@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 )
 
 // Peer is an immutable snapshot of the authenticated remote peer.
@@ -30,17 +30,17 @@ func (p Peer) Identity() []byte { return append([]byte(nil), p.identity...) }
 
 // Metadata is immutable per-message dispatch metadata.
 type Metadata struct {
-	messageType dgpv1.MessageType
+	messageType dgproto.MessageType
 	receivedAt  time.Time
 }
 
 // NewMetadata constructs per-message metadata.
-func NewMetadata(messageType dgpv1.MessageType, receivedAt time.Time) Metadata {
+func NewMetadata(messageType dgproto.MessageType, receivedAt time.Time) Metadata {
 	return Metadata{messageType: messageType, receivedAt: receivedAt}
 }
 
 // MessageType returns the exact DGP message type.
-func (m Metadata) MessageType() dgpv1.MessageType { return m.messageType }
+func (m Metadata) MessageType() dgproto.MessageType { return m.messageType }
 
 // ReceivedAt returns the message arrival time.
 func (m Metadata) ReceivedAt() time.Time { return m.receivedAt }
@@ -76,7 +76,7 @@ type sendCapability interface {
 }
 
 // Context carries cancellation, immutable request snapshots, and narrow send capabilities.
-// It intentionally is not a general-purpose state bag and does not expose dgpv1.Connection.
+// It intentionally is not a general-purpose state bag and does not expose dgproto.Connection.
 type Context struct {
 	context.Context
 	peer      Peer

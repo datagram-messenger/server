@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/datagram-messenger/protocol"
+	"github.com/datagram-messenger/dgproto-go"
 )
 
 // Handler handles one application-visible DGP message.
@@ -25,16 +25,16 @@ type Middleware func(Handler) Handler
 
 // ApplicationMessage is the set accepted by RegisterTyped. T is always a
 // non-pointer value type; TypedHandlerFunc receives *T. This prevents accidental
-// **T signatures and matches the pointer values returned by dgpv1 decoding.
+// **T signatures and matches the pointer values returned by dgproto decoding.
 type ApplicationMessage interface {
-	dgpv1.EncryptedData | dgpv1.Ack | dgpv1.ErrorMessage
+	dgproto.EncryptedData | dgproto.Ack | dgproto.ErrorMessage
 }
 
 // TypedHandlerFunc is a type-safe application handler adapter.
 type TypedHandlerFunc[T ApplicationMessage] func(*Context, *T) error
 
 // RegisterTyped registers a typed handler. Pointer T arguments do not satisfy
-// ApplicationMessage; use RegisterTyped[dgpv1.Ack], not RegisterTyped[*dgpv1.Ack].
+// ApplicationMessage; use RegisterTyped[dgproto.Ack], not RegisterTyped[*dgproto.Ack].
 func RegisterTyped[T ApplicationMessage](router *Router, handler TypedHandlerFunc[T]) error {
 	if router == nil {
 		return ErrNilHandler
@@ -55,15 +55,15 @@ func RegisterTyped[T ApplicationMessage](router *Router, handler TypedHandlerFun
 	}))
 }
 
-func typeFor[T ApplicationMessage]() (dgpv1.MessageType, error) {
+func typeFor[T ApplicationMessage]() (dgproto.MessageType, error) {
 	var zero T
 	switch any(zero).(type) {
-	case dgpv1.EncryptedData:
-		return dgpv1.MessageTypeEncryptedData, nil
-	case dgpv1.Ack:
-		return dgpv1.MessageTypeAck, nil
-	case dgpv1.ErrorMessage:
-		return dgpv1.MessageTypeError, nil
+	case dgproto.EncryptedData:
+		return dgproto.MessageTypeEncryptedData, nil
+	case dgproto.Ack:
+		return dgproto.MessageTypeAck, nil
+	case dgproto.ErrorMessage:
+		return dgproto.MessageTypeError, nil
 	default:
 		return 0, ErrUnsupportedMessage
 	}
@@ -73,14 +73,14 @@ func typeFor[T ApplicationMessage]() (dgpv1.MessageType, error) {
 // Its zero value is ready for use.
 type Router struct {
 	mu         sync.RWMutex
-	handlers   map[dgpv1.MessageType]Handler
+	handlers   map[dgproto.MessageType]Handler
 	middleware []Middleware
-	compiled   map[dgpv1.MessageType]Handler
+	compiled   map[dgproto.MessageType]Handler
 	frozen     bool
 }
 
 // Handle registers a handler for an application-visible message type.
-func (r *Router) Handle(messageType dgpv1.MessageType, handler Handler) error {
+func (r *Router) Handle(messageType dgproto.MessageType, handler Handler) error {
 	if !supportedType(messageType) {
 		return fmt.Errorf("%w: 0x%02x", ErrUnsupportedMessage, messageType)
 	}
@@ -93,7 +93,7 @@ func (r *Router) Handle(messageType dgpv1.MessageType, handler Handler) error {
 		return ErrServerStarted
 	}
 	if r.handlers == nil {
-		r.handlers = make(map[dgpv1.MessageType]Handler)
+		r.handlers = make(map[dgproto.MessageType]Handler)
 	}
 	if _, exists := r.handlers[messageType]; exists {
 		return fmt.Errorf("%w: 0x%02x", ErrDuplicateHandler, messageType)
@@ -125,7 +125,7 @@ func (r *Router) Freeze() error {
 	if r.frozen {
 		return nil
 	}
-	r.compiled = make(map[dgpv1.MessageType]Handler, len(r.handlers))
+	r.compiled = make(map[dgproto.MessageType]Handler, len(r.handlers))
 	for messageType, base := range r.handlers {
 		chain := base
 		for index := len(r.middleware) - 1; index >= 0; index-- {
@@ -167,28 +167,28 @@ func (r *Router) Dispatch(ctx *Context, message any) (err error) {
 	return handler.Handle(ctx, message)
 }
 
-func supportedType(messageType dgpv1.MessageType) bool {
-	return messageType == dgpv1.MessageTypeEncryptedData || messageType == dgpv1.MessageTypeAck || messageType == dgpv1.MessageTypeError
+func supportedType(messageType dgproto.MessageType) bool {
+	return messageType == dgproto.MessageTypeEncryptedData || messageType == dgproto.MessageTypeAck || messageType == dgproto.MessageTypeError
 }
 
-func inboundType(message any) (dgpv1.MessageType, error) {
+func inboundType(message any) (dgproto.MessageType, error) {
 	switch value := message.(type) {
-	case *dgpv1.EncryptedData:
+	case *dgproto.EncryptedData:
 		if value == nil {
 			return 0, ErrInvalidMessageForm
 		}
-		return dgpv1.MessageTypeEncryptedData, nil
-	case *dgpv1.Ack:
+		return dgproto.MessageTypeEncryptedData, nil
+	case *dgproto.Ack:
 		if value == nil {
 			return 0, ErrInvalidMessageForm
 		}
-		return dgpv1.MessageTypeAck, nil
-	case *dgpv1.ErrorMessage:
+		return dgproto.MessageTypeAck, nil
+	case *dgproto.ErrorMessage:
 		if value == nil {
 			return 0, ErrInvalidMessageForm
 		}
-		return dgpv1.MessageTypeError, nil
-	case dgpv1.EncryptedData, dgpv1.Ack, dgpv1.ErrorMessage:
+		return dgproto.MessageTypeError, nil
+	case dgproto.EncryptedData, dgproto.Ack, dgproto.ErrorMessage:
 		return 0, fmt.Errorf("%w: got %T", ErrInvalidMessageForm, message)
 	default:
 		return 0, fmt.Errorf("%w: %T", ErrUnsupportedMessage, message)

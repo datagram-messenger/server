@@ -1,8 +1,8 @@
 # Building applications with `dgpserver`
 
-`pkg/dgpserver` is the application-facing server layer above [`github.com/datagram-messenger/protocol`](https://github.com/datagram-messenger/protocol). It owns typed application dispatch, command routing, middleware, admission, principals, lifecycle hooks, bounded sends, and test seams. `github.com/datagram-messenger/protocol` owns TCP framing, Noise XX, encryption, replay protection, rekeying, keepalives, and connection I/O.
+`pkg/dgpserver` is the application-facing server layer above [`github.com/datagram-messenger/dgproto-go`](https://github.com/datagram-messenger/dgproto-go). It owns typed application dispatch, command routing, middleware, admission, principals, lifecycle hooks, bounded sends, and test seams. `github.com/datagram-messenger/dgproto-go` owns TCP framing, Noise XX, encryption, replay protection, rekeying, keepalives, and connection I/O.
 
-Use this guide when building a service on DGPv1. Read the [normative protocol specification](../protocol/dgp-v1.md) when implementing another peer or reasoning about wire compatibility.
+Use this guide when building a service on DGProto v1. Read the [normative protocol specification](../protocol/dgp-v1.md) when implementing another peer or reasoning about wire compatibility.
 
 ## Start here
 
@@ -20,14 +20,14 @@ An inbound connection moves through these layers:
 
 ```text
 TCP -> Noise XX handshake -> optional Authenticator -> OnConnect
-    -> dgpv1 session/runtime -> dgpserver Router -> middleware -> handler
-    -> Context send capability -> bounded dgpv1 outbound queue -> TCP
+    -> dgproto session/runtime -> dgpserver Router -> middleware -> handler
+    -> Context send capability -> bounded dgproto outbound queue -> TCP
     -> OnDisconnect
 ```
 
 Important boundaries:
 
-- Only `*dgpv1.EncryptedData`, `*dgpv1.Ack`, and `*dgpv1.ErrorMessage` reach application routes. Ping/pong, rekey, close, and handshake messages are runtime-owned.
+- Only `*dgproto.EncryptedData`, `*dgproto.Ack`, and `*dgproto.ErrorMessage` reach application routes. Ping/pong, rekey, close, and handshake messages are runtime-owned.
 - A `Router` is configuration, not a live registry. `Serve`, `Freeze`, or the first dispatch freezes it; later mutation returns `ErrServerStarted`.
 - DGP message routing selects the envelope type. A `CommandRouter` optionally performs a second, codec-neutral dispatch inside `EncryptedData`.
 - The `Context` embeds the connection-scoped `context.Context` and exposes immutable peer/principal/metadata snapshots plus narrow send and close methods. It does not expose session keys or a raw connection.
