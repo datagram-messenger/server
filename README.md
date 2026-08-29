@@ -11,7 +11,7 @@ Secure, real-time messaging services built on DGProto v1.
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![DGProto v1](https://img.shields.io/badge/protocol-DGProto%20v1-6f42c1)](docs/protocol/dgproto-v1.md)
 
-[Quick start](#quick-start) · [Configuration](#configuration) · [Development](#development-commands) · [Documentation](#documentation) · [Contributing](CONTRIBUTING.md)
+[Quick start](#quick-start) · [Configuration](#configuration) · [Development](#development-commands) · [Documentation](#documentation) · [Contributing](.github/CONTRIBUTING.md)
 
 </div>
 
@@ -179,7 +179,7 @@ benchmarks/         Benchmark methodology and published result assets
 
 ## Documentation
 
-- [Contributing guide](CONTRIBUTING.md)
+- [Contributing guide](.github/CONTRIBUTING.md)
 - [DGProto v1 protocol specification](docs/protocol/dgproto-v1.md)
 - [`dgpserver` developer guide](docs/dgpserver/README.md)
 - [`dgpserver` quickstart](docs/dgpserver/quickstart.md)
