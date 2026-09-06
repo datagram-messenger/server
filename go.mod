@@ -3,7 +3,7 @@ module github.com/tr1xdev/datagram-server
 go 1.25.0
 
 require (
-	github.com/datagram-messenger/dgproto-go v0.1.0
+	github.com/datagram-messenger/dgproto-go v0.2.2
 	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/spf13/viper v1.21.0
 )
